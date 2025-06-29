@@ -1,8 +1,9 @@
 package cmd
 
 import (
-	"os"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/achernya/autorip/makemkv"
 	"github.com/spf13/cobra"
@@ -26,7 +27,11 @@ var parseCmd = &cobra.Command{
 		parser := makemkv.NewParser(f)
 		stream := parser.Stream()
 		for msg := range stream {
-			fmt.Println(msg)
+			result, err := json.Marshal(msg)
+			if err != nil {
+				continue
+			}
+			fmt.Println(string(result))
 		}
 		return nil
 	},

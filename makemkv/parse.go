@@ -2,7 +2,12 @@ package makemkv
 
 import (
 	"bufio"
+	"encoding/csv"
+	"fmt"
 	"io"
+	"reflect"
+	"strconv"
+	"strings"
 )
 
 // https://www.makemkv.com/developers/usage.txt contains some
@@ -113,6 +118,8 @@ type Drive struct {
 	DrivePath string
 }
 
+const tagName = "makemkv"
+
 type GenericInfo struct {
 	Unknown                      string `makemkv:"0" json:",omitempty"`
 	Type                         string `makemkv:"1" json:",omitempty"`
@@ -180,14 +187,183 @@ type DiscInfo struct {
 type MakeMkvParser struct {
 	scanner *bufio.Scanner
 }
+func updateGenericInfo(info *GenericInfo, records []string) error {
+	id, err := strconv.Atoi(records[0])
+	if err != nil {
+		return err
+	}
+	_, err = strconv.Atoi(records[1])
+	if err != nil {
+		return nil
+	}
+	v := reflect.ValueOf(info)
+	for i := 0; i < reflect.Indirect(v).NumField(); i++ {
+		// Get the field tag value
+		tag := reflect.Indirect(v).Type().Field(i).Tag.Get(tagName)
+		
+		// Skip if tag is not defined or ignored
+		if tag == "" || tag == "-" {
+			continue
+		}
+		currId, err := strconv.Atoi(tag)
+		if err != nil {
+			return err
+		}
+		if id != currId {
+			continue
+		}
+		reflect.Indirect(v).Field(i).SetString(records[2])
+	}
+	return nil
+}
 
 func (m *MakeMkvParser) Stream() <- chan interface{} {
 	out := make(chan interface{})
 	go func() {
+		info := GenericInfo{}
+		currInfo := ""
+		currIndex := "0"
 		for m.scanner.Scan() {
+			// In case this is a progress message
+			progressType := ProgressTotal
+			// For parsing disc info messages
+			offset := 0
+			newIndex := "0"
+			
 			msg := m.scanner.Text()
-			// For now, shove in the raw string
-			out <- msg
+			// First, split on `:` to get the message type.
+			msgType, rest, found := strings.Cut(msg, ":")
+			if !found {
+				panic("Invalid line encountered")
+			}
+			// makemkvcon doesn't produce a valid CSV, since it escapes `"` as `\"` rather than `""`.
+			rest = strings.ReplaceAll(rest, "\\\"", "\"\"")
+			r := csv.NewReader(strings.NewReader(rest))
+			records, err := r.Read()
+			if err != nil {
+				panic(fmt.Errorf("Unable to parse line %+v: %w", rest, err))
+			}
+			// Special case for the `[CTS]INFO`, the
+			// struct needs to get emitted when the next
+			// message changes.
+			switch msgType {
+			case "SINFO":
+				offset++
+				fallthrough
+			case "TINFO":
+				offset++
+				fallthrough
+			case "CINFO":
+				if offset > 0 {
+					newIndex = records[offset-1]
+				}
+
+			}
+			if currInfo != msgType  || currIndex != newIndex {
+				// Only actually emit the current info object if we are in an "INFO" context.
+				if strings.HasSuffix(currInfo, "INFO") {
+					out <- info
+					info = GenericInfo{}
+				}
+				currInfo = msgType
+				currIndex = newIndex
+			}
+			switch msgType {
+			case "MSG":
+				code, err := strconv.Atoi(records[0])
+				if err != nil {
+					panic(err)
+				}
+				flags, err := strconv.Atoi(records[1])
+				if err != nil {
+					panic(err)
+				}
+				count, err := strconv.Atoi(records[2])
+				if err != nil {
+					panic(err)
+				}
+				out <- Message{
+					Code: code,
+					Flags: MessageFlags(flags),
+					Count: count,
+					Message: records[3],
+					Format: records[4],
+					Params: records[5:],
+				}
+			case "PRGC":
+				progressType = ProgressCurrent
+				fallthrough		
+			case "PRGT":
+				code, err := strconv.Atoi(records[0])
+				if err != nil {
+					panic(err)
+				}
+				id, err := strconv.Atoi(records[1])
+				if err != nil {
+					panic(err)
+				}
+				out <- ProgressTitle{
+					Type: ProgressType(progressType),
+					Code: code,
+					Id: id,
+					Name: records[2],
+				}
+			case "PRGV":
+				current, err := strconv.Atoi(records[0])
+				if err != nil {
+					panic(err)
+				}
+				total, err := strconv.Atoi(records[1])
+				if err != nil {
+					panic(err)
+				}
+				max, err := strconv.Atoi(records[2])
+				if err != nil {
+					panic(err)
+				}
+				out <- ProgressUpdate{
+					Current: current,
+					Total: total,
+					Max: max,
+				}
+			case "DRV":
+				index, err := strconv.Atoi(records[0])
+				if err != nil {
+					panic(err)
+				}
+				state, err := strconv.Atoi(records[1])
+				if err != nil {
+					panic(err)
+				}
+				unknown, err := strconv.Atoi(records[2])
+				if err != nil {
+					panic(err)
+				}
+				flags, err := strconv.Atoi(records[3])
+				if err != nil {
+					panic(err)
+				}
+				out <- Drive{
+					Index: index,
+					State: DriveState(state),
+					Unknown: unknown,
+					Flags: DiskFlags(flags),
+					DriveName: records[4],
+					DiscName: records[5],
+					DrivePath: records[6],
+				}
+			case "SINFO":
+				fallthrough
+			case "TINFO":
+				fallthrough
+			case "CINFO":
+				updateGenericInfo(&info, records[offset:])
+			case "TCOUNT":
+				// We don't actually care about `TCOUNT`, so we can just ignore it.
+			default:
+				panic("Unknown message type")
+			}
+
 		}
 		close(out)
 	}()
