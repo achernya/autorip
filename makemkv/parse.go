@@ -174,7 +174,9 @@ type GenericInfo struct {
 	OffsetSequenceId             string `makemkv:"50" json:",omitempty"`
 }
 
-type StreamInfo GenericInfo
+type StreamInfo struct {
+	GenericInfo
+}
 type TitleInfo struct {
 	GenericInfo
 	Streams []StreamInfo
@@ -187,6 +189,26 @@ type DiscInfo struct {
 type MakeMkvParser struct {
 	scanner *bufio.Scanner
 }
+
+func ensureTitles(info *DiscInfo, titles int) {
+	if info.Titles == nil {
+		info.Titles = make([]TitleInfo, 1)
+	}
+	for len(info.Titles) <= titles {
+		info.Titles = append(info.Titles, TitleInfo{})
+	}
+}
+
+func ensureStreams(info *DiscInfo, title int, streams int) {
+	ensureTitles(info, title)
+	if info.Titles[title].Streams == nil {
+		info.Titles[title].Streams = make([]StreamInfo, 1)
+	}
+	for len(info.Titles[title].Streams) <= streams {
+		info.Titles[title].Streams = append(info.Titles[title].Streams, StreamInfo{})
+	}
+}
+
 func updateGenericInfo(info *GenericInfo, records []string) error {
 	id, err := strconv.Atoi(records[0])
 	if err != nil {
@@ -220,15 +242,12 @@ func updateGenericInfo(info *GenericInfo, records []string) error {
 func (m *MakeMkvParser) Stream() <- chan interface{} {
 	out := make(chan interface{})
 	go func() {
-		info := GenericInfo{}
-		currInfo := ""
-		currIndex := "0"
+		discInfo := DiscInfo{}
+		infoEmitted := false
+		prevTag := "MSG"
 		for m.scanner.Scan() {
 			// In case this is a progress message
 			progressType := ProgressTotal
-			// For parsing disc info messages
-			offset := 0
-			newIndex := "0"
 			
 			msg := m.scanner.Text()
 			// First, split on `:` to get the message type.
@@ -242,31 +261,6 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 			records, err := r.Read()
 			if err != nil {
 				panic(fmt.Errorf("Unable to parse line %+v: %w", rest, err))
-			}
-			// Special case for the `[CTS]INFO`, the
-			// struct needs to get emitted when the next
-			// message changes.
-			switch msgType {
-			case "SINFO":
-				offset++
-				fallthrough
-			case "TINFO":
-				offset++
-				fallthrough
-			case "CINFO":
-				if offset > 0 {
-					newIndex = records[offset-1]
-				}
-
-			}
-			if currInfo != msgType  || currIndex != newIndex {
-				// Only actually emit the current info object if we are in an "INFO" context.
-				if strings.HasSuffix(currInfo, "INFO") {
-					out <- info
-					info = GenericInfo{}
-				}
-				currInfo = msgType
-				currIndex = newIndex
 			}
 			switch msgType {
 			case "MSG":
@@ -353,17 +347,40 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 					DrivePath: records[6],
 				}
 			case "SINFO":
-				fallthrough
+				title, err := strconv.Atoi(records[0])
+				if err != nil {
+					panic(err)
+				}
+				stream, err := strconv.Atoi(records[1])
+				if err != nil {
+					panic(err)
+				}
+				ensureStreams(&discInfo, title, stream)
+				updateGenericInfo(&discInfo.Titles[title].Streams[stream].GenericInfo, records[2:])
 			case "TINFO":
-				fallthrough
+				title, err := strconv.Atoi(records[0])
+				if err != nil {
+					panic(err)
+				}
+				ensureTitles(&discInfo, title)
+				updateGenericInfo(&discInfo.Titles[title].GenericInfo, records[1:])
 			case "CINFO":
-				updateGenericInfo(&info, records[offset:])
+				updateGenericInfo(&discInfo.GenericInfo, records[0:])
 			case "TCOUNT":
 				// We don't actually care about `TCOUNT`, so we can just ignore it.
 			default:
 				panic("Unknown message type")
 			}
-
+			if prevTag != msgType {
+				if strings.HasSuffix(prevTag, "INFO") && !strings.HasSuffix(msgType, "INFO") {
+					infoEmitted = true
+					out <- discInfo
+				}
+				prevTag = msgType
+			}
+		}
+		if !infoEmitted {
+			out <- discInfo
 		}
 		close(out)
 	}()

@@ -11,9 +11,11 @@ import (
 
 
 func init() {
-  rootCmd.AddCommand(parseCmd)
+	parseCmd.Flags().BoolVar(&discOnly, "disc-only", false, "Only print DiscInfo")
+	rootCmd.AddCommand(parseCmd)
 }
 
+var discOnly = false
 
 var parseCmd = &cobra.Command{
 	Use:   "parse [filename]",
@@ -27,6 +29,10 @@ var parseCmd = &cobra.Command{
 		parser := makemkv.NewParser(f)
 		stream := parser.Stream()
 		for msg := range stream {
+			_, isDiscInfo := msg.(makemkv.DiscInfo)
+			if discOnly && !isDiscInfo {
+				continue
+			}
 			result, err := json.Marshal(msg)
 			if err != nil {
 				continue
