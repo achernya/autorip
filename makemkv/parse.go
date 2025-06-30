@@ -222,7 +222,7 @@ func updateGenericInfo(info *GenericInfo, records []string) error {
 	for i := 0; i < reflect.Indirect(v).NumField(); i++ {
 		// Get the field tag value
 		tag := reflect.Indirect(v).Type().Field(i).Tag.Get(tagName)
-		
+
 		// Skip if tag is not defined or ignored
 		if tag == "" || tag == "-" {
 			continue
@@ -239,7 +239,7 @@ func updateGenericInfo(info *GenericInfo, records []string) error {
 	return nil
 }
 
-func (m *MakeMkvParser) Stream() <- chan interface{} {
+func (m *MakeMkvParser) Stream() <-chan interface{} {
 	out := make(chan interface{})
 	go func() {
 		discInfo := DiscInfo{}
@@ -248,7 +248,7 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 		for m.scanner.Scan() {
 			// In case this is a progress message
 			progressType := ProgressTotal
-			
+
 			msg := m.scanner.Text()
 			// First, split on `:` to get the message type.
 			msgType, rest, found := strings.Cut(msg, ":")
@@ -277,16 +277,16 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 					panic(err)
 				}
 				out <- Message{
-					Code: code,
-					Flags: MessageFlags(flags),
-					Count: count,
+					Code:    code,
+					Flags:   MessageFlags(flags),
+					Count:   count,
 					Message: records[3],
-					Format: records[4],
-					Params: records[5:],
+					Format:  records[4],
+					Params:  records[5:],
 				}
 			case "PRGC":
 				progressType = ProgressCurrent
-				fallthrough		
+				fallthrough
 			case "PRGT":
 				code, err := strconv.Atoi(records[0])
 				if err != nil {
@@ -299,7 +299,7 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 				out <- ProgressTitle{
 					Type: ProgressType(progressType),
 					Code: code,
-					Id: id,
+					Id:   id,
 					Name: records[2],
 				}
 			case "PRGV":
@@ -317,8 +317,8 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 				}
 				out <- ProgressUpdate{
 					Current: current,
-					Total: total,
-					Max: max,
+					Total:   total,
+					Max:     max,
 				}
 			case "DRV":
 				index, err := strconv.Atoi(records[0])
@@ -338,12 +338,12 @@ func (m *MakeMkvParser) Stream() <- chan interface{} {
 					panic(err)
 				}
 				out <- Drive{
-					Index: index,
-					State: DriveState(state),
-					Unknown: unknown,
-					Flags: DiskFlags(flags),
+					Index:     index,
+					State:     DriveState(state),
+					Unknown:   unknown,
+					Flags:     DiskFlags(flags),
 					DriveName: records[4],
-					DiscName: records[5],
+					DiscName:  records[5],
 					DrivePath: records[6],
 				}
 			case "SINFO":

@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
 func init() {
 	parseCmd.Flags().BoolVar(&discOnly, "disc-only", false, "Only print DiscInfo")
 	rootCmd.AddCommand(parseCmd)
@@ -20,7 +19,7 @@ var discOnly = false
 var parseCmd = &cobra.Command{
 	Use:   "parse [filename]",
 	Short: "Parse a makemkvcon robot-output and pretty-print it",
-	Args: cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		f, err := os.Open(args[0])
 		if err != nil {
