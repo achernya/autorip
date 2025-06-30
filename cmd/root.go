@@ -8,9 +8,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "autorip",
-	Short: "autorip is a tool to manage ripping media",
+var (
+	makemkvcon = ""
+	rootCmd    = &cobra.Command{
+		Use:   "autorip",
+		Short: "autorip is a tool to manage ripping media",
+	}
+)
+
+func init() {
+	rootCmd.PersistentFlags().StringVar(&makemkvcon, "makemkvcon", "", "path to makemkvcon executable")
+	rootCmd.MarkPersistentFlagRequired("makemkvcon")
 }
 
 func Execute() {
