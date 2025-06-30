@@ -19,6 +19,19 @@ import (
 // there is no index of these messages published anywhere, which
 // effectively makes these fields useless.
 
+const (
+	MessageTag         = "MSG"
+	ProgressCurrentTag = "PRGC"
+	ProgressTitleTag   = "PRGT"
+	ProgressUpdateTag  = "PRGV"
+	DriveTag           = "DRV"
+	StreamInfoTag      = "SINFO"
+	TitleInfoTag       = "TINFO"
+	DiscInfoTag        = "CINFO"
+	TitleCountTag      = "TCOUNT"
+	InfoSuffix         = "INFO"
+)
+
 type MessageFlags int
 
 const (
@@ -187,7 +200,10 @@ type DiscInfo struct {
 }
 
 type MakeMkvParser struct {
-	scanner *bufio.Scanner
+	scanner     *bufio.Scanner
+	discInfo    *DiscInfo
+	infoSeen    bool
+	infoEmitted bool
 }
 
 func ensureTitles(info *DiscInfo, titles int) {
@@ -239,148 +255,214 @@ func updateGenericInfo(info *GenericInfo, records []string) error {
 	return nil
 }
 
+func parseMessage(records []string) (*Message, error) {
+	const columns = 5
+	if len(records) < columns {
+		return nil, fmt.Errorf("Unexpected number of columns for message: got %+v, want %d", records, columns)
+	}
+	code, err := strconv.Atoi(records[0])
+	if err != nil {
+		return nil, err
+	}
+	flags, err := strconv.Atoi(records[1])
+	if err != nil {
+		return nil, err
+	}
+	count, err := strconv.Atoi(records[2])
+	if err != nil {
+		return nil, err
+	}
+	return &Message{
+		Code:    code,
+		Flags:   MessageFlags(flags),
+		Count:   count,
+		Message: records[3],
+		Format:  records[4],
+		Params:  records[5:],
+	}, nil
+}
+
+func parseProgress(progressType int, records []string) (*ProgressTitle, error) {
+	const columns = 3
+	if len(records) != columns {
+		return nil, fmt.Errorf("Unexpected number of columns for progress title: got %+v, want %d", records, columns)
+	}
+	code, err := strconv.Atoi(records[0])
+	if err != nil {
+		return nil, err
+	}
+	id, err := strconv.Atoi(records[1])
+	if err != nil {
+		return nil, err
+	}
+	return &ProgressTitle{
+		Type: ProgressType(progressType),
+		Code: code,
+		Id:   id,
+		Name: records[2],
+	}, nil
+}
+
+func parseProgressUpdate(records []string) (*ProgressUpdate, error) {
+	const columns = 3
+	if len(records) != columns {
+		return nil, fmt.Errorf("Unexpected number of columns for progress update: got %+v, want %d", records, columns)
+	}
+	current, err := strconv.Atoi(records[0])
+	if err != nil {
+		return nil, err
+	}
+	total, err := strconv.Atoi(records[1])
+	if err != nil {
+		return nil, err
+	}
+	max, err := strconv.Atoi(records[2])
+	if err != nil {
+		return nil, err
+	}
+	return &ProgressUpdate{
+		Current: current,
+		Total:   total,
+		Max:     max,
+	}, nil
+
+}
+
+func parseDrive(records []string) (*Drive, error) {
+	const columns = 7
+	if len(records) != columns {
+		return nil, fmt.Errorf("Unexpected number of columns for progress update: got %+v, want %d", records, columns)
+	}
+	index, err := strconv.Atoi(records[0])
+	if err != nil {
+		return nil, err
+	}
+	state, err := strconv.Atoi(records[1])
+	if err != nil {
+		return nil, err
+	}
+	unknown, err := strconv.Atoi(records[2])
+	if err != nil {
+		return nil, err
+	}
+	flags, err := strconv.Atoi(records[3])
+	if err != nil {
+		return nil, err
+	}
+	return &Drive{
+		Index:     index,
+		State:     DriveState(state),
+		Unknown:   unknown,
+		Flags:     DiskFlags(flags),
+		DriveName: records[4],
+		DiscName:  records[5],
+		DrivePath: records[6],
+	}, nil
+
+}
+
+func (m *MakeMkvParser) parseRecord() (string, interface{}, error) {
+	// In case this is a progress message
+	progressType := ProgressTotal
+
+	msg := m.scanner.Text()
+	// First, split on `:` to get the message type.
+	msgType, rest, found := strings.Cut(msg, ":")
+	if !found {
+		return "", nil, fmt.Errorf("invalid line detected: got %+v, want ':'", msg)
+	}
+	// makemkvcon doesn't produce a valid CSV, since it escapes `"` as `\"` rather than `""`.
+	rest = strings.ReplaceAll(rest, "\\\"", "\"\"")
+	r := csv.NewReader(strings.NewReader(rest))
+	records, err := r.Read()
+	if err != nil {
+		return msgType, nil, fmt.Errorf("Unable to parse line %+v: %w", rest, err)
+	}
+	switch msgType {
+	case MessageTag:
+		obj, err := parseMessage(records)
+		if err != nil {
+			return msgType, nil, err
+		}
+		return msgType, obj, nil
+	case ProgressCurrentTag:
+		progressType = ProgressCurrent
+		fallthrough
+	case ProgressTitleTag:
+		obj, err := parseProgress(progressType, records)
+		if err != nil {
+			return msgType, nil, err
+		}
+		return msgType, obj, nil
+	case ProgressUpdateTag:
+		obj, err := parseProgressUpdate(records)
+		if err != nil {
+			return msgType, nil, err
+		}
+		return msgType, obj, nil
+	case DriveTag:
+		obj, err := parseDrive(records)
+		if err != nil {
+			return msgType, nil, err
+		}
+		return msgType, obj, nil
+	case StreamInfoTag:
+		m.infoSeen = true
+		title, err := strconv.Atoi(records[0])
+		if err != nil {
+			return msgType, nil, err
+		}
+		stream, err := strconv.Atoi(records[1])
+		if err != nil {
+			return msgType, nil, err
+		}
+		ensureStreams(m.discInfo, title, stream)
+		updateGenericInfo(&m.discInfo.Titles[title].Streams[stream].GenericInfo, records[2:])
+		return msgType, nil, nil
+	case TitleInfoTag:
+		m.infoSeen = true
+		title, err := strconv.Atoi(records[0])
+		if err != nil {
+			return msgType, nil, err
+		}
+		ensureTitles(m.discInfo, title)
+		updateGenericInfo(&m.discInfo.Titles[title].GenericInfo, records[1:])
+		return msgType, nil, nil
+	case DiscInfoTag:
+		m.infoSeen = true
+		updateGenericInfo(&m.discInfo.GenericInfo, records[0:])
+		return msgType, nil, nil
+	case TitleCountTag:
+		// We don't actually care about `TCOUNT`, so we can just ignore it.
+		return msgType, nil, nil
+	default:
+		return msgType, nil, fmt.Errorf("unknown message type: %+v", msgType)
+	}
+
+}
+
 func (m *MakeMkvParser) Stream() <-chan interface{} {
 	out := make(chan interface{})
 	go func() {
-		discInfo := DiscInfo{}
-		infoEmitted := false
-		prevTag := "MSG"
+		prevTag := MessageTag
 		for m.scanner.Scan() {
-			// In case this is a progress message
-			progressType := ProgressTotal
-
-			msg := m.scanner.Text()
-			// First, split on `:` to get the message type.
-			msgType, rest, found := strings.Cut(msg, ":")
-			if !found {
-				panic("Invalid line encountered")
-			}
-			// makemkvcon doesn't produce a valid CSV, since it escapes `"` as `\"` rather than `""`.
-			rest = strings.ReplaceAll(rest, "\\\"", "\"\"")
-			r := csv.NewReader(strings.NewReader(rest))
-			records, err := r.Read()
+			msgType, obj, err := m.parseRecord()
 			if err != nil {
-				panic(fmt.Errorf("Unable to parse line %+v: %w", rest, err))
+				panic(err)
 			}
-			switch msgType {
-			case "MSG":
-				code, err := strconv.Atoi(records[0])
-				if err != nil {
-					panic(err)
-				}
-				flags, err := strconv.Atoi(records[1])
-				if err != nil {
-					panic(err)
-				}
-				count, err := strconv.Atoi(records[2])
-				if err != nil {
-					panic(err)
-				}
-				out <- Message{
-					Code:    code,
-					Flags:   MessageFlags(flags),
-					Count:   count,
-					Message: records[3],
-					Format:  records[4],
-					Params:  records[5:],
-				}
-			case "PRGC":
-				progressType = ProgressCurrent
-				fallthrough
-			case "PRGT":
-				code, err := strconv.Atoi(records[0])
-				if err != nil {
-					panic(err)
-				}
-				id, err := strconv.Atoi(records[1])
-				if err != nil {
-					panic(err)
-				}
-				out <- ProgressTitle{
-					Type: ProgressType(progressType),
-					Code: code,
-					Id:   id,
-					Name: records[2],
-				}
-			case "PRGV":
-				current, err := strconv.Atoi(records[0])
-				if err != nil {
-					panic(err)
-				}
-				total, err := strconv.Atoi(records[1])
-				if err != nil {
-					panic(err)
-				}
-				max, err := strconv.Atoi(records[2])
-				if err != nil {
-					panic(err)
-				}
-				out <- ProgressUpdate{
-					Current: current,
-					Total:   total,
-					Max:     max,
-				}
-			case "DRV":
-				index, err := strconv.Atoi(records[0])
-				if err != nil {
-					panic(err)
-				}
-				state, err := strconv.Atoi(records[1])
-				if err != nil {
-					panic(err)
-				}
-				unknown, err := strconv.Atoi(records[2])
-				if err != nil {
-					panic(err)
-				}
-				flags, err := strconv.Atoi(records[3])
-				if err != nil {
-					panic(err)
-				}
-				out <- Drive{
-					Index:     index,
-					State:     DriveState(state),
-					Unknown:   unknown,
-					Flags:     DiskFlags(flags),
-					DriveName: records[4],
-					DiscName:  records[5],
-					DrivePath: records[6],
-				}
-			case "SINFO":
-				title, err := strconv.Atoi(records[0])
-				if err != nil {
-					panic(err)
-				}
-				stream, err := strconv.Atoi(records[1])
-				if err != nil {
-					panic(err)
-				}
-				ensureStreams(&discInfo, title, stream)
-				updateGenericInfo(&discInfo.Titles[title].Streams[stream].GenericInfo, records[2:])
-			case "TINFO":
-				title, err := strconv.Atoi(records[0])
-				if err != nil {
-					panic(err)
-				}
-				ensureTitles(&discInfo, title)
-				updateGenericInfo(&discInfo.Titles[title].GenericInfo, records[1:])
-			case "CINFO":
-				updateGenericInfo(&discInfo.GenericInfo, records[0:])
-			case "TCOUNT":
-				// We don't actually care about `TCOUNT`, so we can just ignore it.
-			default:
-				panic("Unknown message type")
+			if obj != nil {
+				out <- obj
 			}
 			if prevTag != msgType {
-				if strings.HasSuffix(prevTag, "INFO") && !strings.HasSuffix(msgType, "INFO") {
-					infoEmitted = true
-					out <- discInfo
+				if strings.HasSuffix(prevTag, InfoSuffix) && !strings.HasSuffix(msgType, InfoSuffix) {
+					m.infoEmitted = true
+					out <- m.discInfo
 				}
 				prevTag = msgType
 			}
 		}
-		if !infoEmitted {
-			out <- discInfo
+		if !m.infoEmitted && m.infoSeen {
+			out <- m.discInfo
 		}
 		close(out)
 	}()
@@ -389,6 +471,7 @@ func (m *MakeMkvParser) Stream() <-chan interface{} {
 
 func NewParser(r io.Reader) *MakeMkvParser {
 	return &MakeMkvParser{
-		scanner: bufio.NewScanner(r),
+		scanner:  bufio.NewScanner(r),
+		discInfo: &DiscInfo{},
 	}
 }

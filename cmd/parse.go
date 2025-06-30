@@ -28,7 +28,7 @@ var parseCmd = &cobra.Command{
 		parser := makemkv.NewParser(f)
 		stream := parser.Stream()
 		for msg := range stream {
-			_, isDiscInfo := msg.(makemkv.DiscInfo)
+			_, isDiscInfo := msg.(*makemkv.DiscInfo)
 			if discOnly && !isDiscInfo {
 				continue
 			}
