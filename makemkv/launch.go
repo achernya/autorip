@@ -1,6 +1,7 @@
 package makemkv
 
 import (
+	"context"
 	"os/exec"
 	"slices"
 )
@@ -13,8 +14,8 @@ type MakeMkvProcess struct {
 	cmd *exec.Cmd
 }
 
-func NewProcess(makemkvcon string, args []string) (*MakeMkvProcess, error) {
-	cmd := exec.Command(makemkvcon, slices.Concat(defaultArgs, args)...)
+func NewProcess(ctx context.Context, makemkvcon string, args []string) (*MakeMkvProcess, error) {
+	cmd := exec.CommandContext(ctx, makemkvcon, slices.Concat(defaultArgs, args)...)
 	return &MakeMkvProcess{cmd: cmd}, nil
 }
 
@@ -31,4 +32,8 @@ func (m *MakeMkvProcess) Start() (*MakeMkvParser, error) {
 
 func (m *MakeMkvProcess) Wait() error {
 	return m.cmd.Wait()
+}
+
+func (m *MakeMkvProcess) Kill() {
+	m.cmd.Process.Kill()
 }

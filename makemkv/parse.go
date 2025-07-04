@@ -199,6 +199,12 @@ type DiscInfo struct {
 	Titles []TitleInfo
 }
 
+type StreamResult struct {
+	Raw    string
+	Type   string
+	Parsed any
+}
+
 type MakeMkvParser struct {
 	scanner     *bufio.Scanner
 	discInfo    *DiscInfo
@@ -361,108 +367,101 @@ func parseDrive(records []string) (*Drive, error) {
 
 }
 
-func (m *MakeMkvParser) parseRecord() (string, interface{}, error) {
+func (m *MakeMkvParser) parseRecord() (*StreamResult, error) {
 	// In case this is a progress message
 	progressType := ProgressTotal
 
-	msg := m.scanner.Text()
+	result := &StreamResult{Raw: m.scanner.Text()}
 	// First, split on `:` to get the message type.
-	msgType, rest, found := strings.Cut(msg, ":")
+	msgType, rest, found := strings.Cut(result.Raw, ":")
 	if !found {
-		return "", nil, fmt.Errorf("invalid line detected: got %+v, want ':'", msg)
+		return nil, fmt.Errorf("invalid line detected: got %+v, want ':'", result.Raw)
 	}
+	result.Type = msgType
 	// makemkvcon doesn't produce a valid CSV, since it escapes `"` as `\"` rather than `""`.
 	rest = strings.ReplaceAll(rest, "\\\"", "\"\"")
 	r := csv.NewReader(strings.NewReader(rest))
 	records, err := r.Read()
 	if err != nil {
-		return msgType, nil, fmt.Errorf("Unable to parse line %+v: %w", rest, err)
+		return nil, fmt.Errorf("Unable to parse line %+v: %w", rest, err)
 	}
 	switch msgType {
 	case MessageTag:
-		obj, err := parseMessage(records)
+		result.Parsed, err = parseMessage(records)
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
-		return msgType, obj, nil
 	case ProgressCurrentTag:
 		progressType = ProgressCurrent
 		fallthrough
 	case ProgressTitleTag:
-		obj, err := parseProgress(progressType, records)
+		result.Parsed, err = parseProgress(progressType, records)
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
-		return msgType, obj, nil
 	case ProgressUpdateTag:
-		obj, err := parseProgressUpdate(records)
+		result.Parsed, err = parseProgressUpdate(records)
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
-		return msgType, obj, nil
 	case DriveTag:
-		obj, err := parseDrive(records)
+		result.Parsed, err = parseDrive(records)
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
-		return msgType, obj, nil
 	case StreamInfoTag:
 		m.infoSeen = true
 		title, err := strconv.Atoi(records[0])
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
 		stream, err := strconv.Atoi(records[1])
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
 		ensureStreams(m.discInfo, title, stream)
 		updateGenericInfo(&m.discInfo.Titles[title].Streams[stream].GenericInfo, records[2:])
-		return msgType, nil, nil
 	case TitleInfoTag:
 		m.infoSeen = true
 		title, err := strconv.Atoi(records[0])
 		if err != nil {
-			return msgType, nil, err
+			return nil, err
 		}
 		ensureTitles(m.discInfo, title)
 		updateGenericInfo(&m.discInfo.Titles[title].GenericInfo, records[1:])
-		return msgType, nil, nil
 	case DiscInfoTag:
 		m.infoSeen = true
 		updateGenericInfo(&m.discInfo.GenericInfo, records[0:])
-		return msgType, nil, nil
 	case TitleCountTag:
 		// We don't actually care about `TCOUNT`, so we can just ignore it.
-		return msgType, nil, nil
 	default:
-		return msgType, nil, fmt.Errorf("unknown message type: %+v", msgType)
+		return nil, fmt.Errorf("unknown message type: %+v", msgType)
 	}
-
+	return result, nil
 }
 
-func (m *MakeMkvParser) Stream() <-chan interface{} {
-	out := make(chan interface{})
+func (m *MakeMkvParser) Stream() <-chan *StreamResult {
+	out := make(chan *StreamResult)
 	go func() {
 		prevTag := MessageTag
 		for m.scanner.Scan() {
-			msgType, obj, err := m.parseRecord()
+			obj, err := m.parseRecord()
 			if err != nil {
 				panic(err)
 			}
 			if obj != nil {
 				out <- obj
 			}
-			if prevTag != msgType {
-				if strings.HasSuffix(prevTag, InfoSuffix) && !strings.HasSuffix(msgType, InfoSuffix) {
+			if prevTag != obj.Type {
+				if strings.HasSuffix(prevTag, InfoSuffix) && !strings.HasSuffix(obj.Type, InfoSuffix) {
 					m.infoEmitted = true
-					out <- m.discInfo
+					out <- &StreamResult{Parsed: m.discInfo}
 				}
-				prevTag = msgType
+				prevTag = obj.Type
 			}
 		}
 		if !m.infoEmitted && m.infoSeen {
-			out <- m.discInfo
+			out <- &StreamResult{Parsed: m.discInfo}
 		}
 		close(out)
 	}()

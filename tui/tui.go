@@ -85,26 +85,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = m.progress.Width - padding
 		return m, nil
 
-	case *makemkv.ProgressTitle:
-		if msg.Type == makemkv.ProgressTotal {
-			m.total = msg.Name
-			m.current = ""
-		} else {
-			m.current = msg.Name
+	case *makemkv.StreamResult:
+		switch msg := msg.Parsed.(type) {
+		case *makemkv.ProgressTitle:
+			if msg.Type == makemkv.ProgressTotal {
+				m.total = msg.Name
+				m.current = ""
+			} else {
+				m.current = msg.Name
+			}
+			m.addLog("[stage] " + m.detail())
+			return m, nil
+			
+		case *makemkv.Message:
+			m.addLog(msg.Message)
+			return m, nil
+			
+		case *makemkv.ProgressUpdate:
+			var cmds []tea.Cmd
+			// Note that you can also use progress.Model.SetPercent to set the
+			// percentage value explicitly, too.
+			cmds = append(cmds, m.progress.SetPercent(float64(msg.Total)/float64(msg.Max)))
+			return m, tea.Batch(cmds...)
+		default:
+			return m, nil
 		}
-		m.addLog("[stage] " + m.detail())
-		return m, nil
-
-	case *makemkv.Message:
-		m.addLog(msg.Message)
-		return m, nil
-
-	case *makemkv.ProgressUpdate:
-		var cmds []tea.Cmd
-		// Note that you can also use progress.Model.SetPercent to set the
-		// percentage value explicitly, too.
-		cmds = append(cmds, m.progress.SetPercent(float64(msg.Total)/float64(msg.Max)))
-		return m, tea.Batch(cmds...)
 	case Eof:
 		return m, tea.Sequence(finalPause(), tea.Quit)
 

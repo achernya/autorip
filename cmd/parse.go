@@ -28,11 +28,11 @@ var parseCmd = &cobra.Command{
 		parser := makemkv.NewParser(f)
 		stream := parser.Stream()
 		for msg := range stream {
-			_, isDiscInfo := msg.(*makemkv.DiscInfo)
+			_, isDiscInfo := msg.Parsed.(*makemkv.DiscInfo)
 			if discOnly && !isDiscInfo {
 				continue
 			}
-			result, err := json.Marshal(msg)
+			result, err := json.Marshal(msg.Parsed)
 			if err != nil {
 				continue
 			}
