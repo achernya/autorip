@@ -1,6 +1,7 @@
 package db
 
 import (
+	"gorm.io/datatypes"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -14,7 +15,7 @@ type Session struct {
 type MakeMkvLog struct {
 	gorm.Model
 	SessionID uint
-	Args      string
+	Args      datatypes.JSONSlice[string]
 	Entry     []MakeMkvLogEntry
 }
 

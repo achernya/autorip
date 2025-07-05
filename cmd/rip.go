@@ -8,6 +8,7 @@ import (
 	"github.com/achernya/autorip/makemkv"
 	"github.com/achernya/autorip/tui"
 	"github.com/spf13/cobra"
+	"gorm.io/datatypes"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -41,11 +42,13 @@ var ripCmd = &cobra.Command{
 		}
 		rawLog := db.MakeMkvLog{}
 		d.Model(&session).Association("RawLog").Append(&rawLog)
-		
+
 		parser, err := process.Start()
 		if err != nil {
 			return err
 		}
+		rawLog.Args = datatypes.NewJSONSlice(process.Args)
+		d.Save(&rawLog)
 
 		wg := sync.WaitGroup{}
 		defer func() {

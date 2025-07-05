@@ -236,6 +236,7 @@ func updateGenericInfo(info *GenericInfo, records []string) error {
 	if err != nil {
 		return err
 	}
+	// The message code seems completely uninteresting for these records.
 	_, err = strconv.Atoi(records[1])
 	if err != nil {
 		return nil
