@@ -232,6 +232,9 @@ func ensureStreams(info *DiscInfo, title int, streams int) {
 }
 
 func updateGenericInfo(info *GenericInfo, records []string) error {
+	if len(records) != 3 {
+		return fmt.Errorf("got %+v, expected 3", records)
+	}
 	id, err := strconv.Atoi(records[0])
 	if err != nil {
 		return err
@@ -448,7 +451,7 @@ func (m *MakeMkvParser) Stream() <-chan *StreamResult {
 		for m.scanner.Scan() {
 			obj, err := m.parseRecord()
 			if err != nil {
-				panic(err)
+				panic(fmt.Sprintf("Failed to parse %+v: %s", m.scanner.Text(), err.Error()))
 			}
 			if obj != nil {
 				out <- obj

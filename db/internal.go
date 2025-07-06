@@ -27,7 +27,7 @@ type MakeMkvLogEntry struct {
 
 type DiscFingerprint struct {
 	gorm.Model
-	Fingerprint []byte
+	Fingerprint []byte `gorm:"uniqueIndex"`
 	Name        string
 	VolumeName  string
 }

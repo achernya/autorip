@@ -32,6 +32,9 @@ var parseCmd = &cobra.Command{
 			if discOnly && !isDiscInfo {
 				continue
 			}
+			if msg.Parsed == nil {
+				continue
+			}
 			result, err := json.Marshal(msg.Parsed)
 			if err != nil {
 				continue
