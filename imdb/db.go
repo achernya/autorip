@@ -262,6 +262,9 @@ func makeSearch(dir string) error {
 
 	mapping := bleve.NewIndexMapping()
 	mapping.DefaultField = "Title"
+	mapping.TypeField = "type"
+	mapping.DefaultAnalyzer = "en"
+	mapping.ScoringModel = "bm25"
 	index, err := bleve.New("imdb.bleve", mapping)
 	if err != nil {
 		return err
