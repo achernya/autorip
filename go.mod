@@ -3,6 +3,7 @@ module github.com/achernya/autorip
 go 1.24.4
 
 require (
+	dario.cat/mergo v1.0.2
 	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.5
@@ -10,6 +11,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/dustin/go-humanize v1.0.1
 	github.com/spf13/cobra v1.9.1
+	github.com/syndtr/goleveldb v1.0.0
 	golang.org/x/crypto v0.39.0
 	gorm.io/datatypes v1.2.6
 	gorm.io/driver/sqlite v1.6.0
@@ -28,6 +30,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
+	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
