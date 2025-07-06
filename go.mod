@@ -3,7 +3,6 @@ module github.com/achernya/autorip
 go 1.24.4
 
 require (
-	dario.cat/mergo v1.0.2
 	github.com/blevesearch/bleve/v2 v2.5.2
 	github.com/cavaliergopher/grab/v3 v3.0.1
 	github.com/charmbracelet/bubbles v0.21.0
@@ -14,6 +13,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/syndtr/goleveldb v1.0.0
 	golang.org/x/crypto v0.39.0
+	google.golang.org/protobuf v1.36.6
 	gorm.io/datatypes v1.2.6
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.30.0
@@ -50,7 +50,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
-	github.com/golang/protobuf v1.3.2 // indirect
+	github.com/golang/protobuf v1.5.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

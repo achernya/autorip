@@ -1,0 +1,32 @@
+edition = "2023";
+
+package autorip;
+option go_package = "github.com/achernya/autorip/proto";
+
+message Title {
+  string t_const = 1;
+  string title_type = 2;
+  string primary_title = 3;
+  string original_title = 4;
+  bool is_adult = 5;
+  int32 start_year = 6;
+  int32 end_year = 7;
+  int32 runtime_minutes = 8;
+  repeated string genres = 9;
+  // Only populated for `tvSeries` (and similar).
+  repeated Title episodes = 10;
+  // Only populated for `tvEpisode`.
+  int32 season_number = 11;
+  int32 episode_number = 12;
+}
+
+message Result {
+  double score = 1;
+  Title entry = 2;
+  int32 num_votes = 3;
+  float average_rating = 4;
+}
+
+message Results {
+  repeated Result result = 1;
+}

@@ -2,25 +2,23 @@ package imdb
 
 import (
 	"bufio"
-	"bytes"
 	"compress/gzip"
-	"encoding/gob"
-	"encoding/json"
 	"fmt"
 	"log"
-	"maps"
 	"os"
 	"path"
 	"slices"
 	"strconv"
 	"strings"
 
-	"dario.cat/mergo"
-	"github.com/achernya/autorip/db"
 	"github.com/blevesearch/bleve/v2"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+
+	pb "github.com/achernya/autorip/proto"
 )
 
 const (
@@ -31,11 +29,9 @@ func key(keys ...string) []byte {
 	return []byte(strings.Join(keys, ","))
 }
 
-func decode(b []byte) (*db.Title, error) {
-	buf := bytes.NewBuffer(b)
-	dec := gob.NewDecoder(buf)
-	entry := &db.Title{}
-	if err := dec.Decode(entry); err != nil {
+func decode(b []byte) (*pb.Title, error) {
+	entry := &pb.Title{}
+	if err := proto.Unmarshal(b, entry); err != nil {
 		return nil, err
 	}
 	return entry, nil
@@ -44,7 +40,7 @@ func decode(b []byte) (*db.Title, error) {
 // lookup finds the given key in the given leveldb database and
 // returns it as a decoded Title. No modification to the returned
 // object will be performed (i.e., TConst is not filled in).
-func lookup(ldb *leveldb.DB, title ...string) (*db.Title, error) {
+func lookup(ldb *leveldb.DB, title ...string) (*pb.Title, error) {
 	b, err := ldb.Get(key(title...), nil)
 	if err != nil {
 		return nil, err
@@ -56,37 +52,37 @@ func lookup(ldb *leveldb.DB, title ...string) (*db.Title, error) {
 	return entry, nil
 }
 
-func episodesSort(a, b *db.Title) int {
-	if a.SeasonNumber == nil {
-		if b.SeasonNumber == nil {
+func episodesSort(a, b *pb.Title) int {
+	if !a.HasSeasonNumber() {
+		if !b.HasSeasonNumber() {
 			return 0
 		}
 		return -1
 	}
-	if b.SeasonNumber == nil {
+	if !b.HasSeasonNumber() {
 		return 1
 	}
-	if *a.SeasonNumber == *b.SeasonNumber {
-		if a.EpisodeNumber == nil {
-			if b.EpisodeNumber == nil {
+	if a.GetSeasonNumber() == b.GetSeasonNumber() {
+		if a.HasEpisodeNumber() {
+			if b.HasEpisodeNumber() {
 				return 0
 			}
 			return -1
 		}
-		if b.EpisodeNumber == nil {
+		if !b.HasEpisodeNumber() {
 			return 1
 		}
-		return *a.EpisodeNumber - *b.EpisodeNumber
+		return int(a.GetEpisodeNumber() - b.GetEpisodeNumber())
 	}
-	return *a.SeasonNumber - *b.SeasonNumber
+	return int(a.GetSeasonNumber() - b.GetSeasonNumber())
 }
 
-func findTitle(ldb *leveldb.DB, title string) (*db.Title, error) {
+func findTitle(ldb *leveldb.DB, title string) (*pb.Title, error) {
 	it := ldb.NewIterator(&util.Range{key(title), nil}, nil)
 	if !it.First() {
 		return nil, fmt.Errorf("could not find key %+v", title)
 	}
-	var entry *db.Title = nil
+	var entry *pb.Title = nil
 	var err error
 	for {
 		currKey := strings.Split(string(it.Key()), ",")
@@ -102,8 +98,8 @@ func findTitle(ldb *leveldb.DB, title string) (*db.Title, error) {
 			if err != nil {
 				return nil, err
 			}
-			entry.TConst = currKey[0]
-			entry.Episodes = make([]*db.Title, 0)
+			entry.SetTConst(currKey[0])
+			entry.SetEpisodes(make([]*pb.Title, 0))
 		case 2:
 			if entry == nil {
 				return nil, fmt.Errorf("encountered subrecord before parent record for key %+v", title)
@@ -112,8 +108,8 @@ func findTitle(ldb *leveldb.DB, title string) (*db.Title, error) {
 			if err != nil {
 				return nil, err
 			}
-			subentry.TConst = currKey[1]
-			entry.Episodes = append(entry.Episodes, subentry)
+			subentry.SetTConst(currKey[1])
+			entry.SetEpisodes(append(entry.GetEpisodes(), subentry))
 		default:
 			return nil, fmt.Errorf("got unexpected %d keys for title %+v", len(currKey), title)
 		}
@@ -127,15 +123,17 @@ func findTitle(ldb *leveldb.DB, title string) (*db.Title, error) {
 	}
 
 	// Fill in per-episode data
-	for _, episode := range entry.Episodes {
-		subentry, err := lookup(ldb, episode.TConst)
+	for _, episode := range entry.GetEpisodes() {
+		subentry, err := lookup(ldb, episode.GetTConst())
 		if err != nil {
 			return nil, err
 		}
-		mergo.Merge(episode, subentry, mergo.WithoutDereference)
+		proto.Merge(episode, subentry)
 	}
 	// Always return the episodes sorted, even though they're not stored that way.
-	slices.SortFunc(entry.Episodes, episodesSort)
+	eps := entry.GetEpisodes()
+	slices.SortFunc(eps, episodesSort)
+	entry.SetEpisodes(eps)
 	return entry, nil
 }
 
@@ -164,38 +162,35 @@ func loadTitles(ldb *leveldb.DB, dir string) error {
 	if err != nil {
 		return err
 	}
-	buf := new(bytes.Buffer)
 	count := 0
 	batch := leveldb.Batch{}
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		record := strings.Split(line, "\t")
-		title := db.Title{
-			TitleType:     record[1],
-			PrimaryTitle:  record[2],
-			OriginalTitle: record[3],
+		title := pb.Title_builder{
+			TitleType:     proto.String(record[1]),
+			PrimaryTitle:  proto.String(record[2]),
+			OriginalTitle: proto.String(record[3]),
 			Genres:        strings.Split(record[8], ","),
-		}
+		}.Build()
 		if b, err := strconv.ParseBool(record[4]); err == nil {
-			title.IsAdult = b
+			title.SetIsAdult(b)
 		}
 		if year, err := strconv.Atoi(record[5]); err == nil {
-			title.StartYear = year
+			title.SetStartYear(int32(year))
 		}
 		if year, err := strconv.Atoi(record[6]); err == nil {
-			title.EndYear = &year
+			title.SetEndYear(int32(year))
 		}
 		if runtime, err := strconv.Atoi(record[7]); err == nil {
-			title.RuntimeMinutes = runtime
+			title.SetRuntimeMinutes(int32(runtime))
 		}
-		// Drop any old data before encoding the struct
-		buf.Reset()
-		enc := gob.NewEncoder(buf)
-		if err := enc.Encode(title); err != nil {
+		b, err := proto.Marshal(title)
+		if err != nil {
 			return err
 		}
-		batch.Put(key(record[0]), buf.Bytes())
+		batch.Put(key(record[0]), b)
 		count++
 		if count == batchSize {
 			if err := tx.Write(&batch, nil); err != nil {
@@ -221,7 +216,6 @@ func loadEpisodes(ldb *leveldb.DB, dir string) error {
 	if err != nil {
 		return err
 	}
-	buf := new(bytes.Buffer)
 	count := 0
 	batch := leveldb.Batch{}
 
@@ -231,22 +225,20 @@ func loadEpisodes(ldb *leveldb.DB, dir string) error {
 		tConst := record[0]
 		parentTConst := record[1]
 		// First, add the metadata to the episode
-		update := db.Title{}
+		update := &pb.Title{}
 		seasonNumber, err := strconv.Atoi(record[2])
 		if err == nil {
-			update.SeasonNumber = &seasonNumber
+			update.SetSeasonNumber(int32(seasonNumber))
 		}
 		episodeNumber, err := strconv.Atoi(record[3])
 		if err == nil {
-			update.EpisodeNumber = &episodeNumber
+			update.SetEpisodeNumber(int32(episodeNumber))
 		}
-		// Drop any old data before encoding the struct
-		buf.Reset()
-		enc := gob.NewEncoder(buf)
-		if err := enc.Encode(update); err != nil {
+		b, err := proto.Marshal(update)
+		if err != nil {
 			return err
 		}
-		batch.Put(key(parentTConst, tConst), buf.Bytes())
+		batch.Put(key(parentTConst, tConst), b)
 		count++
 		if count == batchSize {
 			if err := tx.Write(&batch, nil); err != nil {
@@ -299,7 +291,7 @@ func makeSearch(dir string) error {
 			AverageRating float32
 			NumVotes      int
 		}{
-			Title: l.PrimaryTitle,
+			Title: l.GetPrimaryTitle(),
 		}
 		rating, err := strconv.ParseFloat(record[1], 32)
 		if err != nil {
@@ -406,24 +398,25 @@ func Search(title string) (string, error) {
 		return "", fmt.Errorf("no results for %+v", title)
 	}
 
-	results := make([]map[string]any, 0)
+	results := &pb.Results{}
+	results.SetResult(make([]*pb.Result, 0))
 	maxResults := min(len(searchResult.Hits), 10)
 
 	for i := range maxResults {
-		result := make(map[string]any)
+		result := &pb.Result{}
 
 		entry, err := findTitle(ldb, searchResult.Hits[i].ID)
 		if err != nil {
 			return "", err
 		}
 
-		result["Entry"] = entry
-		result["Score"] = searchResult.Hits[i].Score
-		maps.Copy(result, searchResult.Hits[i].Fields)
-		results = append(results, result)
+		result.SetEntry(entry)
+		result.SetScore(searchResult.Hits[i].Score)
+		//maps.Copy(result, searchResult.Hits[i].Fields)
+		results.SetResult(append(results.GetResult(), result))
 	}
 
-	s, err := json.Marshal(results)
+	s, err := protojson.Marshal(results)
 	if err != nil {
 		return "", err
 	}
