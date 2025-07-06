@@ -8,13 +8,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
 
 	"dario.cat/mergo"
 	"github.com/achernya/autorip/db"
+	"github.com/blevesearch/bleve/v2"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -51,6 +54,31 @@ func lookup(ldb *leveldb.DB, title ...string) (*db.Title, error) {
 		return nil, err
 	}
 	return entry, nil
+}
+
+func episodesSort(a, b *db.Title) int {
+	if a.SeasonNumber == nil {
+		if b.SeasonNumber == nil {
+			return 0
+		}
+		return -1
+	}
+	if b.SeasonNumber == nil {
+		return 1
+	}
+	if *a.SeasonNumber == *b.SeasonNumber {
+		if a.EpisodeNumber == nil {
+			if b.EpisodeNumber == nil {
+				return 0
+			}
+			return -1
+		}
+		if b.EpisodeNumber == nil {
+			return 1
+		}
+		return *a.EpisodeNumber - *b.EpisodeNumber
+	}
+	return *a.SeasonNumber - *b.SeasonNumber
 }
 
 func findTitle(ldb *leveldb.DB, title string) (*db.Title, error) {
@@ -106,21 +134,31 @@ func findTitle(ldb *leveldb.DB, title string) (*db.Title, error) {
 		}
 		mergo.Merge(episode, subentry, mergo.WithoutDereference)
 	}
+	// Always return the episodes sorted, even though they're not stored that way.
+	slices.SortFunc(entry.Episodes, episodesSort)
 	return entry, nil
 }
 
-func loadTitles(ldb *leveldb.DB, dir string) error {
-	fgz, err := os.Open(basics)
+func imdbScanner(dir string, filename string) (*bufio.Scanner, error) {
+	fgz, err := os.Open(path.Join(dir, filename))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	f, err := gzip.NewReader(fgz)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	scanner := bufio.NewScanner(f)
 	// Consume the header
 	scanner.Scan()
+	return scanner, nil
+}
+
+func loadTitles(ldb *leveldb.DB, dir string) error {
+	scanner, err := imdbScanner(dir, basics)
+	if err != nil {
+		return err
+	}
 
 	tx, err := ldb.OpenTransaction()
 	if err != nil {
@@ -134,7 +172,6 @@ func loadTitles(ldb *leveldb.DB, dir string) error {
 		line := scanner.Text()
 		record := strings.Split(line, "\t")
 		title := db.Title{
-			//TConst:        record[0],
 			TitleType:     record[1],
 			PrimaryTitle:  record[2],
 			OriginalTitle: record[3],
@@ -175,17 +212,10 @@ func loadTitles(ldb *leveldb.DB, dir string) error {
 }
 
 func loadEpisodes(ldb *leveldb.DB, dir string) error {
-	fgz, err := os.Open(episodes)
+	scanner, err := imdbScanner(dir, episodes)
 	if err != nil {
 		return err
 	}
-	f, err := gzip.NewReader(fgz)
-	if err != nil {
-		return err
-	}
-	scanner := bufio.NewScanner(f)
-	// Consume the header line
-	scanner.Scan()
 
 	tx, err := ldb.OpenTransaction()
 	if err != nil {
@@ -232,14 +262,94 @@ func loadEpisodes(ldb *leveldb.DB, dir string) error {
 	return tx.Commit()
 }
 
-func MakeIndex(dir string) error {
-	ldb, err := leveldb.OpenFile("imdb.leveldb", &opt.Options{
+func makeSearch(dir string) error {
+	ldb, err := openLevelDb(true)
+	if err != nil {
+		return err
+	}
+
+	mapping := bleve.NewIndexMapping()
+	mapping.DefaultField = "Title"
+	index, err := bleve.New("imdb.bleve", mapping)
+	if err != nil {
+		return err
+	}
+
+	scanner, err := imdbScanner(dir, ratings)
+	if err != nil {
+		return err
+	}
+
+	count := 0
+	batch := index.NewBatch()
+
+	log.Println("Making search index")
+	for scanner.Scan() {
+		line := scanner.Text()
+		record := strings.Split(line, "\t")
+		if len(record) != 3 {
+			return fmt.Errorf("got %+v, want 3 columns", line)
+		}
+		l, err := lookup(ldb, record[0])
+		if err != nil {
+			return err
+		}
+		entry := struct {
+			Title         string
+			AverageRating float32
+			NumVotes      int
+		}{
+			Title: l.PrimaryTitle,
+		}
+		rating, err := strconv.ParseFloat(record[1], 32)
+		if err != nil {
+			return err
+		}
+		entry.AverageRating = float32(rating)
+		votes, err := strconv.Atoi(record[2])
+		if err != nil {
+			return err
+		}
+		entry.NumVotes = votes
+		batch.Index(record[0], entry)
+		count++
+		if count == batchSize {
+			if err := index.Batch(batch); err != nil {
+				return err
+			}
+			batch = index.NewBatch()
+			count = 0
+		}
+	}
+	log.Println("Done")
+	return index.Batch(batch)
+}
+
+func openLevelDb(read bool) (*leveldb.DB, error) {
+	options := &opt.Options{
 		// Ideally we'd use zstd here, but it's not available.
 		Compression: opt.SnappyCompression,
+	}
+	if read {
+		// Database should already exist
+		options.ErrorIfExist = false
+		options.ErrorIfMissing = true
+		// We won't do any writes here.
+		options.ReadOnly = true
+	} else {
 		// We expect to create the database here.
-		ErrorIfExist:   true,
-		ErrorIfMissing: false,
-	})
+		options.ErrorIfExist = true
+		options.ErrorIfMissing = false
+	}
+	return leveldb.OpenFile("imdb.leveldb", options)
+}
+
+func openBleve(dir string) (bleve.Index, error) {
+	return bleve.Open("imdb.bleve")
+}
+
+func makeImdb(dir string) error {
+	ldb, err := openLevelDb(false)
 	if err != nil {
 		return err
 	}
@@ -265,41 +375,55 @@ func MakeIndex(dir string) error {
 	return nil
 }
 
+func MakeIndex(dir string) error {
+	if err := makeImdb(dir); err != nil {
+		return err
+	}
+	if err := makeSearch(dir); err != nil {
+		return err
+	}
+	return nil
+}
+
 func Search(title string) (string, error) {
-	ldb, err := leveldb.OpenFile("imdb.leveldb", &opt.Options{
-		// Ideally we'd use zstd here, but it's not available.
-		Compression: opt.SnappyCompression,
-		// Database should already exist
-		ErrorIfExist:   false,
-		ErrorIfMissing: true,
-		// We won't do any writes here.
-		ReadOnly: true,
-	})
+	ldb, err := openLevelDb(true)
 	if err != nil {
 		return "", err
 	}
-	entry, err := findTitle(ldb, title)
+	index, err := openBleve(".")
 	if err != nil {
 		return "", err
 	}
-	// Episodes aren't going to be sorted in any canonical order
-	// by the database, so do it manually.
-	slices.SortFunc(entry.Episodes, func(a, b *db.Title) int {
-		if a.SeasonNumber == b.SeasonNumber {
-			// nul
-			return 0
+
+	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(title))
+	searchRequest.Fields = []string{"NumVotes", "AverageRating"}
+	searchRequest.SortBy([]string{"-_score", "-NumVotes"})
+	searchResult, err := index.Search(searchRequest)
+	if err != nil {
+		return "", err
+	}
+	if len(searchResult.Hits) == 0 {
+		return "", fmt.Errorf("no results for %+v", title)
+	}
+
+	results := make([]map[string]any, 0)
+	maxResults := min(len(searchResult.Hits), 10)
+
+	for i := range maxResults {
+		result := make(map[string]any)
+
+		entry, err := findTitle(ldb, searchResult.Hits[i].ID)
+		if err != nil {
+			return "", err
 		}
-		if *a.SeasonNumber == *b.SeasonNumber {
-			// Handle nil. It's impossible for them to be
-			// equal if they're real pointers.
-			if a.EpisodeNumber == b.EpisodeNumber {
-				return 0
-			}
-			return *a.EpisodeNumber - *b.EpisodeNumber
-		}
-		return *a.SeasonNumber - *b.SeasonNumber
-	})
-	s, err := json.Marshal(entry)
+
+		result["Entry"] = entry
+		result["Score"] = searchResult.Hits[i].Score
+		maps.Copy(result, searchResult.Hits[i].Fields)
+		results = append(results, result)
+	}
+
+	s, err := json.Marshal(results)
 	if err != nil {
 		return "", err
 	}

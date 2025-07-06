@@ -13,6 +13,7 @@ const (
 	datasetSource = "https://datasets.imdbws.com/"
 	basics = "title.basics.tsv.gz"
 	episodes = "title.episode.tsv.gz"
+	ratings = "title.ratings.tsv.gz"
 )
 
 var (
@@ -21,6 +22,8 @@ var (
 		basics,
 		// Association between a `tvSeries` and a `tvEpisode`.
 		episodes,
+		// Ratings, for better ranking of results
+		ratings,
 	}
 )
 
