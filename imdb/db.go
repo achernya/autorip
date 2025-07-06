@@ -412,7 +412,8 @@ func Search(title string) (string, error) {
 
 		result.SetEntry(entry)
 		result.SetScore(searchResult.Hits[i].Score)
-		//maps.Copy(result, searchResult.Hits[i].Fields)
+		result.SetNumVotes(int32(searchResult.Hits[i].Fields["NumVotes"].(float64)))
+		result.SetAverageRating(float32(searchResult.Hits[i].Fields["AverageRating"].(float64)))
 		results.SetResult(append(results.GetResult(), result))
 	}
 
