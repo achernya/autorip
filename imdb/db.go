@@ -2,9 +2,8 @@ package imdb
 
 import (
 	"compress/gzip"
-	"encoding/csv"
 	"encoding/json"
-	"io"
+	"bufio"
 	"log"
 	"os"
 	"slices"
@@ -17,7 +16,7 @@ import (
 )
 
 func loadTitles(d *gorm.DB, dir string) error {
-	fgz, err := os.Open("westworld-titles.txt.gz")
+	fgz, err := os.Open(basics)
 	if err != nil {
 		return err
 	}
@@ -25,18 +24,14 @@ func loadTitles(d *gorm.DB, dir string) error {
 	if err != nil {
 		return err
 	}
-	reader := csv.NewReader(f)
-	reader.Comma = '\t'
-	reader.LazyQuotes = true
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
+	scanner := bufio.NewScanner(f)
+	// Consume the header
+	scanner.Scan()
+	
+	tx := d.Begin()
+	for scanner.Scan() {
+		line := scanner.Text()
+		record := strings.Split(line, "\t")
 		title := db.Title{
 			TConst:        record[0],
 			TitleType:     record[1],
@@ -56,16 +51,16 @@ func loadTitles(d *gorm.DB, dir string) error {
 		if runtime, err := strconv.Atoi(record[7]); err == nil {
 			title.RuntimeMinutes = runtime
 		}
-		result := d.Create(&title)
+		result := tx.Create(&title)
 		if result.Error != nil {
 			return result.Error
 		}
 	}
-	return nil
+	return tx.Commit().Error
 }
 
 func loadEpisodes(d *gorm.DB, dir string) error {
-	fgz, err := os.Open("westworld-episodes.txt.gz")
+	fgz, err := os.Open(episodes)
 	if err != nil {
 		return err
 	}
@@ -73,43 +68,43 @@ func loadEpisodes(d *gorm.DB, dir string) error {
 	if err != nil {
 		return err
 	}
-	reader := csv.NewReader(f)
-	reader.Comma = '\t'
+	scanner := bufio.NewScanner(f)
+	// Consume the header line
+	scanner.Scan()
 
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
+	tx := d.Begin()
+	for scanner.Scan() {
+		line := scanner.Text()
+		record := strings.Split(line, "\t")
 		tConst := record[0]
 		parentTConst := record[1]
 		// First, add the metadata to the episode
 		episode := db.Title{}
-		result := d.Where("t_const = ?", tConst).First(&episode)
+		result := tx.Select("ID").Where("t_const = ?", tConst).First(&episode)
 		if result.Error != nil {
 			return result.Error
 		}
-		if seasonNumber, err := strconv.Atoi(record[2]); err == nil {
-			episode.SeasonNumber = &seasonNumber
+		update := db.Title{}
+		seasonNumber, err := strconv.Atoi(record[2])
+		if err == nil {
+			update.SeasonNumber = &seasonNumber
 		}
-		if episodeNumber, err := strconv.Atoi(record[3]); err == nil {
-			episode.EpisodeNumber = &episodeNumber
+		episodeNumber, err := strconv.Atoi(record[3])
+		if err == nil {
+			update.EpisodeNumber = &episodeNumber
 		}
-		d.Save(&episode)
+		tx.Model(&episode).Updates(update)
 		// Now, update the parent series with the association
 		series := db.Title{}
-		result = d.Where("t_const = ?", parentTConst).First(&series)
+		result = tx.Select("ID").Where("t_const = ?", parentTConst).First(&series)
 		if result.Error != nil {
 			return result.Error
 		}
-		if err := d.Model(&series).Association("Episodes").Append(&episode); err != nil {
+		if err := tx.Model(&series).Association("Episodes").Append(&episode); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit().Error
 }
 
 func MakeIndex(dir string) error {
@@ -118,21 +113,22 @@ func MakeIndex(dir string) error {
 		return err
 	}
 	// Drop the existing tables
-	log.Println("Dropping old tables")
-	d.Exec("DELETE FROM titles")
-	d.Exec("DELETE FROM episodes")
+	// log.Println("Dropping old tables")
+	// d.Exec("DELETE FROM titles")
+	// d.Exec("DELETE FROM episodes")
 
 	// Load titles
-	log.Println("Loading titles")
-	if err := loadTitles(d, dir); err != nil {
-		return err
-	}
+	// log.Println("Loading titles")
+	// if err := loadTitles(d, dir); err != nil {
+	// 	return err
+	// }
 
 	// Load episodes
 	log.Println("Loading episodes")
 	if err := loadEpisodes(d, dir); err != nil {
 		return err
 	}
+	log.Println("Done")
 	return nil
 }
 

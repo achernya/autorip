@@ -8,7 +8,7 @@ import (
 
 type Title struct {
 	gorm.Model
-	TConst string
+	TConst string `gorm:"index"`
 	TitleType string
 	PrimaryTitle string
 	OriginalTitle string
