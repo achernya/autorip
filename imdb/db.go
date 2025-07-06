@@ -1,9 +1,9 @@
 package imdb
 
 import (
+	"bufio"
 	"compress/gzip"
 	"encoding/json"
-	"bufio"
 	"log"
 	"os"
 	"slices"
@@ -27,12 +27,12 @@ func loadTitles(d *gorm.DB, dir string) error {
 	scanner := bufio.NewScanner(f)
 	// Consume the header
 	scanner.Scan()
-	
-	tx := d.Begin()
+
+	buf := make([]*db.Title, 0, 1000)
 	for scanner.Scan() {
 		line := scanner.Text()
 		record := strings.Split(line, "\t")
-		title := db.Title{
+		title := &db.Title{
 			TConst:        record[0],
 			TitleType:     record[1],
 			PrimaryTitle:  record[2],
@@ -51,12 +51,13 @@ func loadTitles(d *gorm.DB, dir string) error {
 		if runtime, err := strconv.Atoi(record[7]); err == nil {
 			title.RuntimeMinutes = runtime
 		}
-		result := tx.Create(&title)
-		if result.Error != nil {
-			return result.Error
+		buf = append(buf, title)
+		if len(buf) == 1000 {
+			d.CreateInBatches(buf, 1000)
+			buf = make([]*db.Title, 0, 1000)
 		}
 	}
-	return tx.Commit().Error
+	return d.CreateInBatches(buf, 1000).Error
 }
 
 func loadEpisodes(d *gorm.DB, dir string) error {
@@ -72,7 +73,9 @@ func loadEpisodes(d *gorm.DB, dir string) error {
 	// Consume the header line
 	scanner.Scan()
 
-	tx := d.Begin()
+	sess := gorm.Session{SkipHooks: true}
+	tx := d.Session(&sess).Begin()
+	count := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 		record := strings.Split(line, "\t")
@@ -93,7 +96,7 @@ func loadEpisodes(d *gorm.DB, dir string) error {
 		if err == nil {
 			update.EpisodeNumber = &episodeNumber
 		}
-		tx.Model(&episode).Updates(update)
+		tx.Model(&episode).Select("SeasonNumber", "EpisodeNumber").Updates(update)
 		// Now, update the parent series with the association
 		series := db.Title{}
 		result = tx.Select("ID").Where("t_const = ?", parentTConst).First(&series)
@@ -103,12 +106,23 @@ func loadEpisodes(d *gorm.DB, dir string) error {
 		if err := tx.Model(&series).Association("Episodes").Append(&episode); err != nil {
 			return err
 		}
+		count++
+		if count == 1000 {
+			if err := tx.Commit().Error; err != nil {
+				return err
+			}
+			tx = d.Begin()
+			count = 0
+		}
 	}
-	return tx.Commit().Error
+	if count > 0 {
+		return tx.Commit().Error
+	}
+	return nil
 }
 
 func MakeIndex(dir string) error {
-	d, err := db.OpenImdb("imdb.sqlite")
+	d, err := db.OpenImdb("file:imdb.sqlite?_journal=WAL&_sync=NORMAL&_cache_size=-32000&cache=shared") // "file::memory:?cache=shared")
 	if err != nil {
 		return err
 	}
@@ -118,10 +132,14 @@ func MakeIndex(dir string) error {
 	// d.Exec("DELETE FROM episodes")
 
 	// Load titles
-	// log.Println("Loading titles")
-	// if err := loadTitles(d, dir); err != nil {
-	// 	return err
-	// }
+	log.Println("Loading titles")
+	if err := loadTitles(d, dir); err != nil {
+		return err
+	}
+	if err := d.Exec("PRAGMA optimize").Error; err != nil {
+		return err
+	}
+	
 
 	// Load episodes
 	log.Println("Loading episodes")
