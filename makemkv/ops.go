@@ -102,7 +102,9 @@ func discInfoToFingerprint(discInfo *DiscInfo) ([]byte, error) {
 }
 
 // ScanDrive will invoke `makemkvcon` to find all attached disc drives
-// and their state (e.g., is a disc inserted).
+// and their state (e.g., is a disc inserted). Note that calling this
+// function may perturb any concurrent accesses other processes are
+// doing to their own disc drive.
 func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 	if err := m.sessionIfNeeded(); err != nil {
 		return nil, err
@@ -118,11 +120,14 @@ func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 		}
 		switch msg := msg.Parsed.(type) {
 		case *Drive:
+			// No point in reporting drives that don't exist.
 			if msg.State != DriveNoDrive {
 				result = append(result, msg)
 			}
 		}
 	}
+	// Passing `invalid` as an argument, is not supported by
+	// makemkvcon. But it prints drive statuses anyway!
 	if err := m.run(context.Background(), cb, "invalid"); err != nil {
 		return nil, err
 	}
