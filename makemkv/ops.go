@@ -15,14 +15,14 @@ import (
 )
 
 type MakeMkv struct {
-	db         *gorm.DB
+	DB         *gorm.DB
 	makemkvcon string
 	session    *db.Session
 }
 
 func New(d *gorm.DB, makemkvcon string) *MakeMkv {
 	return &MakeMkv{
-		db:         d,
+		DB:         d,
 		makemkvcon: makemkvcon,
 	}
 }
@@ -32,12 +32,12 @@ func (m *MakeMkv) sessionIfNeeded() error {
 		return nil
 	}
 	m.session = &db.Session{}
-	return m.db.Create(m.session).Error
+	return m.DB.Create(m.session).Error
 }
 
 func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool), args ...string) error {
 	rawLog := db.MakeMkvLog{}
-	if err := m.db.Model(m.session).Association("RawLog").Append(&rawLog); err != nil {
+	if err := m.DB.Model(m.session).Association("RawLog").Append(&rawLog); err != nil {
 		return err
 	}
 	process, err := NewProcess(ctx, m.makemkvcon, args)
@@ -49,7 +49,7 @@ func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool),
 		return err
 	}
 	rawLog.Args = datatypes.NewJSONSlice(process.Args)
-	if err := m.db.Save(&rawLog).Error; err != nil {
+	if err := m.DB.Save(&rawLog).Error; err != nil {
 		return err
 	}
 
@@ -74,7 +74,7 @@ func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool),
 					return
 				}
 				if len(msg.Raw) > 0 {
-					m.db.Model(&rawLog).Association("Entry").Append(&db.MakeMkvLogEntry{Entry: msg.Raw})
+					m.DB.Model(&rawLog).Association("Entry").Append(&db.MakeMkvLogEntry{Entry: msg.Raw})
 				}
 			}
 		}
@@ -201,12 +201,12 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 		Name:        discInfo.Name,
 		VolumeName:  discInfo.VolumeName,
 	}
-	dbx := m.db.Where("Fingerprint = ?", fp).Attrs(insert).FirstOrCreate(&result)
+	dbx := m.DB.Where("Fingerprint = ?", fp).Attrs(insert).FirstOrCreate(&result)
 	if dbx.Error != nil {
 		return nil, dbx.Error
 	}
 	m.session.DiscFingerprintID = &result.ID
-	if err := m.db.Save(m.session).Error; err != nil {
+	if err := m.DB.Save(m.session).Error; err != nil {
 		return nil, err
 	}
 
