@@ -17,11 +17,11 @@ var (
 	// These distributions were calcuated with some throwaway code
 	// on 2025-07-12 using the latest available IMDb data at the time.
 	dists = map[string]distribution{
-		"movie": distribution{
+		"movie": {
 			mean:   88.96,
 			stddev: 27.35,
 		},
-		"tvEpisode": distribution{
+		"tvEpisode": {
 			mean:   39.04,
 			stddev: 29.34,
 		},

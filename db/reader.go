@@ -2,8 +2,8 @@ package db
 
 import (
 	"bytes"
-	"io"
 	"database/sql"
+	"io"
 
 	"gorm.io/gorm"
 )
@@ -37,7 +37,7 @@ func (r *logReader) Read(p []byte) (n int, err error) {
 
 func NewLogReader(db *gorm.DB, logid uint) (io.Reader, error) {
 	result := &logReader{
-		db:  db,
+		db: db,
 	}
 	rows, err := db.Raw("SELECT id,entry FROM make_mkv_log_entries WHERE make_mkv_log_id = ? ORDER BY id ASC", logid).Rows()
 	if err != nil {

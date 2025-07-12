@@ -8,7 +8,7 @@ import (
 
 var (
 	driveIndex int
-	logid2      int
+	logid2     int
 )
 
 func init() {
