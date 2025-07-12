@@ -149,9 +149,15 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	if len(drives) == 0 {
 		return nil, fmt.Errorf("no disc drives found")
 	}
-	targetDrive := 0
-	if drives[targetDrive].State != DriveInserted {
-		return nil, fmt.Errorf("no disc inserted")
+	targetDrive := -1
+	for index, drive := range drives {
+		if drive.State == DriveInserted {
+			targetDrive = index
+			break
+		}
+	}
+	if targetDrive == -1 {
+		return nil, fmt.Errorf("no disc inserted in any drive")
 	}
 
 	var discInfo *DiscInfo = nil
@@ -167,7 +173,10 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 		}
 	}
 	log.Printf("Analyzing drive %d\n", drives[targetDrive].Index)
-	if err := m.run(context.Background(), cb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[0].Index)); err != nil {
+	// We pass --noscan here to avoid accessing any other drives
+	// to avoid perturbing any concurrent processes working with
+	// them.
+	if err := m.run(context.Background(), cb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[targetDrive].Index)); err != nil {
 		return nil, err
 	}
 	<-ch
