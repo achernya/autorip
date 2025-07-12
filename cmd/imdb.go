@@ -16,7 +16,7 @@ func init() {
 
 var (
 	imdbCmd = &cobra.Command{
-		Use: "imdb",
+		Use:   "imdb",
 		Short: "Collection of subcommands for IMDb",
 	}
 	indexCmd = &cobra.Command{
@@ -31,7 +31,7 @@ var (
 		},
 	}
 	searchCmd = &cobra.Command{
-		Use: "search",
+		Use:   "search",
 		Short: "Look up a given IMDb entry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

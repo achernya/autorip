@@ -1,8 +1,8 @@
 package discid
 
 import (
-	"fmt"
 	"crypto/sha256"
+	"fmt"
 
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"

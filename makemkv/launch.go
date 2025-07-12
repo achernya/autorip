@@ -43,7 +43,7 @@ type MakeMkvProcess struct {
 
 func NewProcess(ctx context.Context, makemkvcon string, args []string) (*MakeMkvProcess, error) {
 	result := &MakeMkvProcess{
-		Args:  slices.Concat(defaultArgs, args),
+		Args: slices.Concat(defaultArgs, args),
 	}
 	result.cmd = exec.CommandContext(ctx, makemkvcon, result.Args...)
 	return result, nil

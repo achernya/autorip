@@ -96,11 +96,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.addLog("[stage] " + m.detail())
 			return m, nil
-			
+
 		case *makemkv.Message:
 			m.addLog(msg.Message)
 			return m, nil
-			
+
 		case *makemkv.ProgressUpdate:
 			var cmds []tea.Cmd
 			// Note that you can also use progress.Model.SetPercent to set the

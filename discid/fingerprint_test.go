@@ -2,8 +2,8 @@ package discid
 
 import (
 	"bytes"
-	"testing"
 	"encoding/hex"
+	"testing"
 )
 
 func TestSerializeNullDisc(t *testing.T) {
@@ -15,10 +15,10 @@ func TestSerializeNullDisc(t *testing.T) {
 }
 
 func TestSerialize(t *testing.T) {
-	tests := map[string]struct{
-		input *Disc
+	tests := map[string]struct {
+		input    *Disc
 		expected []byte
-	} {
+	}{
 		"empty disc": {
 			input: &Disc{},
 			// SEQUENCE { OCTET_STRING {} SEQUENCE {} }
@@ -43,13 +43,12 @@ func TestSerialize(t *testing.T) {
 				Name: "Disc 1",
 				Titles: []Title{{
 					Filename: "00000.mpls",
-					Size: 1234,
+					Size:     1234,
 					Duration: "00:00:01",
 				}, {
 					Filename: "00001.mpls",
-					Size: 5678,
+					Size:     5678,
 					Duration: "01:00:00",
-					
 				}},
 			},
 			// SEQUENCE {
@@ -83,22 +82,21 @@ func TestSerialize(t *testing.T) {
 }
 
 func TestFingerprint(t *testing.T) {
-	tests := map[string]struct{
-		input *Disc
+	tests := map[string]struct {
+		input    *Disc
 		expected string
-	} {
+	}{
 		"full disc": {
 			input: &Disc{
 				Name: "Disc 1",
 				Titles: []Title{{
 					Filename: "00000.mpls",
-					Size: 1234,
+					Size:     1234,
 					Duration: "00:00:01",
 				}, {
 					Filename: "00001.mpls",
-					Size: 5678,
+					Size:     5678,
 					Duration: "01:00:00",
-					
 				}},
 			},
 			expected: "b6075493dee08c318ef7a90d9c252af288e94ee6b72e4a27ccb9245854a421a1",

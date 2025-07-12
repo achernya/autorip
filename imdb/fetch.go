@@ -11,9 +11,9 @@ import (
 
 const (
 	datasetSource = "https://datasets.imdbws.com/"
-	basics = "title.basics.tsv.gz"
-	episodes = "title.episode.tsv.gz"
-	ratings = "title.ratings.tsv.gz"
+	basics        = "title.basics.tsv.gz"
+	episodes      = "title.episode.tsv.gz"
+	ratings       = "title.ratings.tsv.gz"
 )
 
 var (
@@ -55,4 +55,3 @@ func Fetch(ctx context.Context, dir string) error {
 	}
 	return nil
 }
-
