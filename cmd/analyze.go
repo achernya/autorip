@@ -19,7 +19,11 @@ var analyzeCmd = &cobra.Command{
 			return err
 		}
 		mkv := makemkv.New(d, makemkvcon)
-		_, err = mkv.Analyze()
+		drives, err := mkv.ScanDrive()
+		if err != nil {
+			return err
+		}
+		_, err = mkv.Analyze(drives)
 		if err != nil {
 			return err
 		}

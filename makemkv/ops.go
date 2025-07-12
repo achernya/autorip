@@ -101,11 +101,14 @@ func discInfoToFingerprint(discInfo *DiscInfo) ([]byte, error) {
 	return discid.Fingerprint(disc)
 }
 
+// ScanDrive will invoke `makemkvcon` to find all attached disc drives
+// and their state (e.g., is a disc inserted).
 func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 	if err := m.sessionIfNeeded(); err != nil {
 		return nil, err
 	}
 
+	log.Println("Looking for disc drives")
 	result := make([]*Drive, 0)
 	ch := make(chan struct{})
 	cb := func(msg *StreamResult, eof bool) {
@@ -134,13 +137,13 @@ type Analysis struct {
 	DiscInfo   *DiscInfo
 }
 
-func (m *MakeMkv) Analyze() (*Analysis, error) {
+// Analyze finds the first drive with a disc inserted and analyzes the
+// contents of that disc, producing a fingerprint. Usually the input
+// `drives` comes from ScanDrive, but can be specified manually. The
+// only fields checked in Drive as Index and State, and State bust be
+// DriveInserted.
+func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	if err := m.sessionIfNeeded(); err != nil {
-		return nil, err
-	}
-	log.Println("Looking for disc drives")
-	drives, err := m.ScanDrive()
-	if err != nil {
 		return nil, err
 	}
 	if len(drives) == 0 {
@@ -163,8 +166,8 @@ func (m *MakeMkv) Analyze() (*Analysis, error) {
 			discInfo = msg
 		}
 	}
-	log.Printf("Scanning drive %d\n", drives[targetDrive].Index)
-	if err := m.run(context.Background(), cb, "info", fmt.Sprintf("disc:%d", drives[0].Index)); err != nil {
+	log.Printf("Analyzing drive %d\n", drives[targetDrive].Index)
+	if err := m.run(context.Background(), cb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[0].Index)); err != nil {
 		return nil, err
 	}
 	<-ch
@@ -184,7 +187,7 @@ func (m *MakeMkv) Analyze() (*Analysis, error) {
 		Name:        discInfo.Name,
 		VolumeName:  discInfo.VolumeName,
 	}
-	dbx := m.db.FirstOrCreate(&result, insert)
+	dbx := m.db.Where("Fingerprint = ?", fp).Attrs(insert).FirstOrCreate(&result)
 	if dbx.Error != nil {
 		return nil, dbx.Error
 	}
@@ -200,7 +203,7 @@ func (m *MakeMkv) Analyze() (*Analysis, error) {
 	}
 
 	unique := "new"
-	if analysis.New {
+	if !analysis.New {
 		unique = "seen before"
 	}
 	log.Printf("Found disc %s (%s) = %s [%s]\n", result.VolumeName, result.Name, hex.EncodeToString(result.Fingerprint), unique)
