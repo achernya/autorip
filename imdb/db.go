@@ -3,6 +3,7 @@ package imdb
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -380,49 +381,77 @@ func MakeIndex(dir string) error {
 	return nil
 }
 
-func Search(title string) (string, error) {
+func Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
 	ldb, err := openLevelDb(true)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	index, err := openBleve(".")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(title))
+	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(query))
+	// For now, hard code the maximum results we're willing to
+	// return to 100. In an ideal world, we'd paginate 10 at a
+	// time and remove this limit, but realistically this is more
+	// than anyone will ever need.
+	searchRequest.Size = 100
 	searchRequest.Fields = []string{"NumVotes", "AverageRating"}
 	searchRequest.SortBy([]string{"-_score", "-NumVotes"})
 	searchResult, err := index.Search(searchRequest)
 	if err != nil {
-		return "", err
-	}
-	if len(searchResult.Hits) == 0 {
-		return "", fmt.Errorf("no results for %+v", title)
+		return nil, err
 	}
 
+	ch := make(chan *pb.Result)
+	go func() {
+		for _, hit := range searchResult.Hits {
+			result := &pb.Result{}
+			entry, err := findTitle(ldb, hit.ID)
+			if err != nil {
+				log.Println(err)
+				break
+			}
+
+			result.SetEntry(entry)
+			result.SetScore(hit.Score)
+			result.SetNumVotes(int32(hit.Fields["NumVotes"].(float64)))
+			result.SetAverageRating(float32(hit.Fields["AverageRating"].(float64)))
+			select {
+			case <-ctx.Done():
+				break
+			case ch <- result:
+			}
+		}
+		close(ch)
+
+	}()
+	return ch, nil
+}
+
+func SearchJSON(query string, maxResults int) (string, error) {
 	results := &pb.Results{}
 	results.SetResult(make([]*pb.Result, 0))
-	maxResults := min(len(searchResult.Hits), 10)
 
-	for i := range maxResults {
-		result := &pb.Result{}
-
-		entry, err := findTitle(ldb, searchResult.Hits[i].ID)
-		if err != nil {
-			return "", err
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := Search(ctx, query)
+	if err != nil {
+		return "", err
+	}
+	for len(results.GetResult()) < maxResults {
+		result, ok := <-ch
+		if !ok {
+			break
 		}
-
-		result.SetEntry(entry)
-		result.SetScore(searchResult.Hits[i].Score)
-		result.SetNumVotes(int32(searchResult.Hits[i].Fields["NumVotes"].(float64)))
-		result.SetAverageRating(float32(searchResult.Hits[i].Fields["AverageRating"].(float64)))
 		results.SetResult(append(results.GetResult(), result))
 	}
+	cancel()
 
 	s, err := protojson.Marshal(results)
 	if err != nil {
 		return "", err
 	}
 	return string(s), nil
+
 }

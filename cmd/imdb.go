@@ -8,7 +8,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	maxResults int
+)
+
 func init() {
+	searchCmd.Flags().IntVarP(&maxResults, "max-results", "m", 10, "maximum number of results to show")
+
 	imdbCmd.AddCommand(indexCmd)
 	imdbCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(imdbCmd)
@@ -35,7 +41,7 @@ var (
 		Short: "Look up a given IMDb entry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := imdb.Search(args[0])
+			result, err := imdb.SearchJSON(args[0], maxResults)
 			if err != nil {
 				return err
 			}
