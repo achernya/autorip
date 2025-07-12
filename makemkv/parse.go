@@ -48,6 +48,7 @@ const (
 	MessageBoxWarning  = 0x404
 	MessageBoxYesNo    = 0x308
 	MessageBoxYesNoErr = 0x508
+	MessageBoxYesNoReg = 0x608
 	MessageYes         = 0x0
 	MessageNo          = 0x1
 	MessageDebug       = 0x20

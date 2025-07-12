@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"sync"
 	"strconv"
+	"sync"
 
 	"github.com/achernya/autorip/db"
 	"github.com/achernya/autorip/discid"
@@ -82,6 +82,25 @@ func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool),
 	return nil
 }
 
+func discInfoToFingerprint(discInfo *DiscInfo) ([]byte, error) {
+	disc := &discid.Disc{
+		Name:   discInfo.VolumeName,
+		Titles: make([]discid.Title, 0),
+	}
+	for _, t := range discInfo.Titles {
+		title := discid.Title{
+			Filename: t.SourceFileName,
+			Duration: t.Duration,
+		}
+		if size, err := strconv.ParseInt(t.DiskSizeBytes, 10, 64); err == nil {
+			title.Size = size
+		}
+		disc.Titles = append(disc.Titles, title)
+	}
+
+	return discid.Fingerprint(disc)
+}
+
 func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 	if err := m.sessionIfNeeded(); err != nil {
 		return nil, err
@@ -109,7 +128,13 @@ func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 	return result, nil
 }
 
-func (m *MakeMkv) Analyze() (*db.DiscFingerprint, error) {
+type Analysis struct {
+	DriveIndex int
+	New        bool
+	DiscInfo   *DiscInfo
+}
+
+func (m *MakeMkv) Analyze() (*Analysis, error) {
 	if err := m.sessionIfNeeded(); err != nil {
 		return nil, err
 	}
@@ -121,7 +146,8 @@ func (m *MakeMkv) Analyze() (*db.DiscFingerprint, error) {
 	if len(drives) == 0 {
 		return nil, fmt.Errorf("no disc drives found")
 	}
-	if drives[0].State != DriveInserted {
+	targetDrive := 0
+	if drives[targetDrive].State != DriveInserted {
 		return nil, fmt.Errorf("no disc inserted")
 	}
 
@@ -137,7 +163,7 @@ func (m *MakeMkv) Analyze() (*db.DiscFingerprint, error) {
 			discInfo = msg
 		}
 	}
-	log.Printf("Scanning drive %d\n", drives[0].Index)
+	log.Printf("Scanning drive %d\n", drives[targetDrive].Index)
 	if err := m.run(context.Background(), cb, "info", fmt.Sprintf("disc:%d", drives[0].Index)); err != nil {
 		return nil, err
 	}
@@ -147,22 +173,7 @@ func (m *MakeMkv) Analyze() (*db.DiscFingerprint, error) {
 		return nil, fmt.Errorf("internal error occurred, no disc info found")
 	}
 
-	disc := &discid.Disc{
-		Name:   discInfo.VolumeName,
-		Titles: make([]discid.Title, 0),
-	}
-	for _, t := range discInfo.Titles {
-		title := discid.Title{
-			Filename: t.SourceFileName,
-			Duration: t.Duration,
-		}
-		if size, err := strconv.ParseInt(t.DiskSizeBytes, 10, 64); err == nil {
-			title.Size = size
-		}
-		disc.Titles = append(disc.Titles, title)
-	}
-
-	fp, err := discid.Fingerprint(disc)
+	fp, err := discInfoToFingerprint(discInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -173,13 +184,25 @@ func (m *MakeMkv) Analyze() (*db.DiscFingerprint, error) {
 		Name:        discInfo.Name,
 		VolumeName:  discInfo.VolumeName,
 	}
-	if err := m.db.FirstOrCreate(&result, insert).Error; err != nil {
-		return nil, err
+	dbx := m.db.FirstOrCreate(&result, insert)
+	if dbx.Error != nil {
+		return nil, dbx.Error
 	}
 	m.session.DiscFingerprintID = &result.ID
-	if err := m.db.Save(m.session).Error;  err != nil {
+	if err := m.db.Save(m.session).Error; err != nil {
 		return nil, err
 	}
-	log.Printf("Found disc %s (%s) = %s\n", result.VolumeName, result.Name, hex.EncodeToString(result.Fingerprint))
-	return &result, nil
+
+	analysis := &Analysis{
+		DriveIndex: targetDrive,
+		New:        dbx.RowsAffected != 0,
+		DiscInfo:   discInfo,
+	}
+
+	unique := "new"
+	if analysis.New {
+		unique = "seen before"
+	}
+	log.Printf("Found disc %s (%s) = %s [%s]\n", result.VolumeName, result.Name, hex.EncodeToString(result.Fingerprint), unique)
+	return analysis, nil
 }
