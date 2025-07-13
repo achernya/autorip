@@ -2,6 +2,7 @@ package imdb
 
 import (
 	"bufio"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -54,28 +55,17 @@ func lookup(ldb *leveldb.DB, title ...string) (*pb.Title, error) {
 }
 
 func episodesSort(a, b *pb.Title) int {
-	if !a.HasSeasonNumber() {
-		if !b.HasSeasonNumber() {
-			return 0
-		}
-		return -1
-	}
-	if !b.HasSeasonNumber() {
-		return 1
+	if !a.HasSeasonNumber() || !b.HasSeasonNumber() {
+		// Incomparable
+		return 0
 	}
 	if a.GetSeasonNumber() == b.GetSeasonNumber() {
-		if a.HasEpisodeNumber() {
-			if b.HasEpisodeNumber() {
-				return 0
-			}
-			return -1
+		if !a.HasEpisodeNumber() || !b.HasEpisodeNumber() {
+			// Incomparable
 		}
-		if !b.HasEpisodeNumber() {
-			return 1
-		}
-		return int(a.GetEpisodeNumber() - b.GetEpisodeNumber())
+		return cmp.Compare(a.GetEpisodeNumber(), b.GetEpisodeNumber())
 	}
-	return int(a.GetSeasonNumber() - b.GetSeasonNumber())
+	return cmp.Compare(a.GetSeasonNumber(), b.GetSeasonNumber())
 }
 
 func findTitle(ldb *leveldb.DB, title string) (*pb.Title, error) {
@@ -270,6 +260,7 @@ func makeSearch(dir string) error {
 	if err != nil {
 		return err
 	}
+	defer index.Close()
 
 	scanner, err := imdbScanner(dir, ratings)
 	if err != nil {

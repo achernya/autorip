@@ -2,10 +2,16 @@ package makemkv
 
 import (
 	"cmp"
+	"context"
 	"log"
 	"math"
 	"slices"
+	"strings"
 	"time"
+
+	"github.com/achernya/autorip/imdb"
+
+	pb "github.com/achernya/autorip/proto"
 )
 
 type distribution struct {
@@ -27,6 +33,92 @@ var (
 		},
 	}
 )
+
+type Aspect struct {
+	Score       int
+	Description string
+}
+
+func AspectsOf(ti *TitleInfo) []Aspect {
+	result := make([]Aspect, 0)
+	hasVideo := false
+	hasAudio := false
+	hasSubtitles := false
+	for _, si := range ti.Streams {
+		hasVideo = hasVideo || si.Type == "Video"
+		hasAudio = hasAudio || si.Type == "Audio"
+		hasSubtitles = hasSubtitles || si.Type == "Subtitles"
+	}
+	if hasVideo {
+		result = append(result, Aspect{
+			Score:       0x80,
+			Description: "has at least 1 video stream",
+		})
+	}
+	if hasAudio {
+		result = append(result, Aspect{
+			Score:       0x40,
+			Description: "has at least 1 audio stream",
+		})
+
+	}
+	if hasSubtitles {
+		result = append(result, Aspect{
+			Score:       0x20,
+			Description: "has at least 1 audio stream",
+		})
+	}
+	if len(ti.ChapterCount) > 0 {
+		result = append(result, Aspect{
+			Score:       0x10,
+			Description: "has chapters",
+		})
+	}
+	return result
+}
+
+func scoreAspects(aspects []Aspect) int {
+	sum := 0
+	for _, aspect := range aspects {
+		sum += aspect.Score
+	}
+	return sum
+}
+
+// FilterDiscInfo will return a map of {index, TitleInfo} of all
+// titles that are likely to contain "main features". This is
+// calculated by looking at the aspects of the different titles, and
+// giving them each a score. Aspects analyzed include having a video
+// track, audio track, and subtitles track, as well as having chapter
+// markers. A title with the highest score is most likely the main feature.
+//
+// It is possible (and in the case of a tvSeries, likely) that there
+// will be multiple titles that have these properties.
+func FilterDiscInfo(di *DiscInfo) map[int]*TitleInfo {
+	result := make(map[int]*TitleInfo)
+	for index, ti := range di.Titles {
+		result[index] = &ti
+	}
+	aspects := make(map[int][]Aspect)
+	maxScore := 0
+	for index, ti := range result {
+		aspects[index] = AspectsOf(ti)
+		score := scoreAspects(aspects[index])
+		if score > maxScore {
+			maxScore = score
+		}
+	}
+	for index := range result {
+		score := scoreAspects(aspects[index])
+		if score == maxScore {
+			continue
+		}
+		log.Printf("Removing index %d, score %d < %d\n", index, score, maxScore)
+		delete(result, index)
+	}
+	return result
+
+}
 
 type Score struct {
 	TitleIndex int
@@ -56,9 +148,12 @@ func parseHhMmSs(in string) (time.Duration, error) {
 // score, type, and index for the titles on the disc. Note that this
 // function will return "tvEpisode", not "tvSeries" as it's
 // identifying the content on the disc.
-func DiscLikelyContains(discInfo *DiscInfo) ([]*Score, error) {
+//
+// The input to this function should be the filtered map produced by
+// FilterDiscInfo.
+func DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, error) {
 	scores := make([]*Score, 0)
-	for index, title := range discInfo.Titles {
+	for index, title := range titles {
 		dur, err := parseHhMmSs(title.Duration)
 		if err != nil {
 			return nil, err
@@ -99,8 +194,82 @@ func DiscLikelyContains(discInfo *DiscInfo) ([]*Score, error) {
 		return cmp.Compare(a.Duration, b.Duration)
 	})
 	slices.Reverse(scores)
-	if len(scores) > 0 {
-		log.Printf("title %d likely %s (score=%f) [%s]\n", scores[0].TitleIndex, scores[0].Type, scores[0].Likelihood, scores[0].Duration)
+	for _, score := range scores {
+		log.Printf("title %d likely %s (score=%f) [%s]\n", score.TitleIndex, score.Type, score.Likelihood, score.Duration)
 	}
 	return scores, nil
+}
+
+func XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
+	// volume names have '_' instead of ' ', but we need the
+	// search terms to be seperated by spaces to work well.
+	query := strings.ReplaceAll(di.Name, "_", " ")
+	// Also escape `:` since that will be a field selector
+	query = strings.ReplaceAll(query, ":", "\\:")
+	log.Printf("Searching %+q\n", query)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := imdb.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	for info := range ch {
+		// For now, we'll use a very simple algorithm: assume
+		// that the classifier for movie vs tvEpisode was
+		// correct, then find the first entry that has a
+		// "similar enough" runtime. That should be enough to
+		// distinguish between remakes.
+		entry := info.GetEntry()
+		if entry.GetTitleType() == "tvEpisode" {
+			// The search engine returns individual
+			// episodes, but we're interested in the
+			// container series at this point.
+			continue
+		}
+		if entry.GetTitleType() != scores[0].Type {
+			log.Printf("Skipping %s (got %s, want %s)\n", entry.GetTConst(), entry.GetTitleType(), scores[0].Type)
+			continue
+		}
+		durations := []time.Duration{time.Minute * time.Duration(entry.GetRuntimeMinutes()), scores[0].Duration}
+		slices.Sort(durations)
+		ratio := float64(durations[0]) / float64(durations[1])
+		if ratio > 0.975 {
+			log.Printf("Found [%s] %s\n", entry.GetTConst(), entry.GetPrimaryTitle())
+			return entry, nil
+		}
+		log.Printf("Skipping %s, bad ratio %f\n", entry.GetPrimaryTitle(), ratio)
+	}
+	return nil, nil
+}
+
+type Plan struct {
+	Identity  *pb.Title
+	DiscInfo  *DiscInfo
+	RipTitles []*Score
+}
+
+func MakePlan(discInfo *DiscInfo) (*Plan, error) {
+	titles := FilterDiscInfo(discInfo)
+	likely, err := DiscLikelyContains(titles)
+	if err != nil {
+		return nil, err
+	}
+	identity, err := XrefImdb(discInfo, likely)
+	if err != nil {
+		return nil, err
+	}
+	result := &Plan{
+		Identity:  identity,
+		DiscInfo:  discInfo,
+		RipTitles: likely,
+	}
+	if identity.GetTitleType() == "movie" {
+		// For a movie, only the first title will be
+		// ripped.
+
+		// TODO(achernya): deal with the Inception edge case
+		// here and in XrefImdb.
+		result.RipTitles = result.RipTitles[:1]
+	}
+	return result, nil
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -35,29 +37,29 @@ func (m *MakeMkv) sessionIfNeeded() error {
 	return m.DB.Create(m.session).Error
 }
 
-func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool), args ...string) error {
+func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool), args ...string) (func(), error) {
 	rawLog := db.MakeMkvLog{}
 	if err := m.DB.Model(m.session).Association("RawLog").Append(&rawLog); err != nil {
-		return err
+		return nil, err
 	}
 	process, err := NewProcess(ctx, m.makemkvcon, args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	parser, err := process.Start()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	rawLog.Args = datatypes.NewJSONSlice(process.Args)
 	if err := m.DB.Save(&rawLog).Error; err != nil {
-		return err
+		return nil, err
 	}
 
 	wg := sync.WaitGroup{}
-	defer func() {
+	wait := func() {
 		wg.Wait()
 		process.Wait()
-	}()
+	}
 
 	wg.Add(1)
 	go func() {
@@ -74,12 +76,21 @@ func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool),
 					return
 				}
 				if len(msg.Raw) > 0 {
-					m.DB.Model(&rawLog).Association("Entry").Append(&db.MakeMkvLogEntry{Entry: msg.Raw})
+					// Normally, with gorm, we'd want to do
+					//
+					// m.DB.Model(&rawLog).Association("Entry").Append(&db.MakeMkvLogEntry{Entry: msg.Raw})
+					//
+					// but this appears to be a giant read-modify-write of _every_ log entry.
+					// This is silly; we'll create it by hand.
+					m.DB.Create(&db.MakeMkvLogEntry{
+						MakeMkvLogID: rawLog.ID,
+						Entry:        msg.Raw,
+					})
 				}
 			}
 		}
 	}()
-	return nil
+	return wait, nil
 }
 
 func discInfoToFingerprint(discInfo *DiscInfo) ([]byte, error) {
@@ -112,10 +123,8 @@ func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 
 	log.Println("Looking for disc drives")
 	result := make([]*Drive, 0)
-	ch := make(chan struct{})
 	cb := func(msg *StreamResult, eof bool) {
 		if eof {
-			close(ch)
 			return
 		}
 		switch msg := msg.Parsed.(type) {
@@ -128,10 +137,11 @@ func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 	}
 	// Passing `invalid` as an argument, is not supported by
 	// makemkvcon. But it prints drive statuses anyway!
-	if err := m.run(context.Background(), cb, "invalid"); err != nil {
+	wait, err := m.run(context.Background(), cb, "invalid")
+	if err != nil {
 		return nil, err
 	}
-	<-ch
+	wait()
 
 	return result, nil
 }
@@ -166,10 +176,8 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	}
 
 	var discInfo *DiscInfo = nil
-	ch := make(chan struct{})
 	cb := func(msg *StreamResult, eof bool) {
 		if eof {
-			close(ch)
 			return
 		}
 		switch msg := msg.Parsed.(type) {
@@ -181,10 +189,11 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	// We pass --noscan here to avoid accessing any other drives
 	// to avoid perturbing any concurrent processes working with
 	// them.
-	if err := m.run(context.Background(), cb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[targetDrive].Index)); err != nil {
+	wait, err := m.run(context.Background(), cb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[targetDrive].Index))
+	if err != nil {
 		return nil, err
 	}
-	<-ch
+	wait()
 
 	if discInfo == nil {
 		return nil, fmt.Errorf("internal error occurred, no disc info found")
@@ -222,4 +231,28 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	}
 	log.Printf("Found disc %s (%s) = %s [%s]\n", result.VolumeName, result.Name, hex.EncodeToString(result.Fingerprint), unique)
 	return analysis, nil
+}
+
+const destDir = "/Users/achernya/Rip"
+
+func (m *MakeMkv) Rip(drive *Drive, plan *Plan, cb func(msg *StreamResult, eof bool)) error {
+	if err := m.sessionIfNeeded(); err != nil {
+		return err
+	}
+	for _, title := range plan.RipTitles {
+		wait, err := m.run(context.Background(), cb, "--noscan", "mkv", fmt.Sprintf("disc:%d", drive.Index), fmt.Sprintf("%d", title.TitleIndex), destDir)
+		if err != nil {
+			return err
+		}
+		wait()
+		src := filepath.Join(destDir, plan.DiscInfo.Titles[title.TitleIndex].OutputFileName)
+		dst := filepath.Join(destDir, fmt.Sprintf("%s (%d).mkv", plan.Identity.GetPrimaryTitle(), plan.Identity.GetStartYear()))
+		log.Printf("Renaming %s to %s\n", src, dst)
+		err = os.Rename(src, dst)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

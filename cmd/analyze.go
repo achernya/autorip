@@ -65,7 +65,7 @@ var analyzeCmd = &cobra.Command{
 			return err
 		}
 		analysis, err := analyze(mkv, drives)
-		_, err = makemkv.DiscLikelyContains(analysis.DiscInfo)
+		_, err = makemkv.MakePlan(analysis.DiscInfo)
 		if err != nil {
 			return err
 		}
