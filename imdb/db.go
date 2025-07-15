@@ -332,7 +332,9 @@ func openLevelDb(read bool) (*leveldb.DB, error) {
 }
 
 func openBleve(dir string) (bleve.Index, error) {
-	return bleve.Open("imdb.bleve")
+	return bleve.OpenUsing("imdb.bleve", map[string]interface{}{
+		"read_only": true,
+	})
 }
 
 func makeImdb(dir string) error {
@@ -381,6 +383,7 @@ func Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer index.Close()
 
 	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(query))
 	// For now, hard code the maximum results we're willing to
