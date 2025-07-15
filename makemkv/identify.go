@@ -189,6 +189,15 @@ func DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, error) {
 	}
 	slices.SortFunc(scores, func(a, b *Score) int {
 		if a.Duration == b.Duration {
+			if a.Likelihood == b.Likelihood {
+				// If two things are equally likely,
+				// then we should defer to the
+				// index. However, since we're going
+				// to reverse the scores after
+				// sorting, flip the order here so the
+				// lower index is first.
+				return cmp.Compare(b.TitleIndex, a.TitleIndex)
+			}
 			return cmp.Compare(a.Likelihood, b.Likelihood)
 		}
 		return cmp.Compare(a.Duration, b.Duration)
@@ -206,6 +215,8 @@ func XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
 	query := strings.ReplaceAll(di.Name, "_", " ")
 	// Also escape `:` since that will be a field selector
 	query = strings.ReplaceAll(query, ":", "\\:")
+	// Also escape `-` since that is a negation character.
+	query = strings.ReplaceAll(query, "-", "\\-")
 	log.Printf("Searching %+q\n", query)
 	ctx, cancel := context.WithCancel(context.Background())
 	ch, err := imdb.Search(ctx, query)
