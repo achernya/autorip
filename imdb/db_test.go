@@ -25,7 +25,7 @@ func newTmpDir(t *testing.T) *tmpDir {
 }
 
 func (t *tmpDir) Cleanup() {
-	os.RemoveAll(t.dir)
+	os.RemoveAll(t.dir) //nolint:errcheck
 }
 
 func TestCanMakeEmptyIndex(t *testing.T) {
@@ -60,12 +60,12 @@ func copyTestData(dir string) error {
 		if err != nil {
 			return err
 		}
-		defer src.Close()
+		defer src.Close() //nolint:errcheck
 		dst, err := os.Create(path.Join(dir, f))
 		if err != nil {
 			return err
 		}
-		defer dst.Close()
+		defer dst.Close() //nolint:errcheck
 		writer := gzip.NewWriter(dst)
 		_, err = io.Copy(writer, src)
 		if err != nil {
@@ -107,7 +107,6 @@ func TestPopulateAndQueryIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error while performing search: %+v", err)
 	}
-	ok := true
 	result, ok := <-ch
 	if !ok {
 		t.Fatal("got 0 results, want at least")
@@ -118,7 +117,7 @@ func TestPopulateAndQueryIndex(t *testing.T) {
 	}
 	count := 0
 	for {
-		result, ok = <-ch
+		_, ok = <-ch
 		if ok {
 			count++
 			continue

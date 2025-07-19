@@ -37,7 +37,7 @@ func (m *MakeMkv) sessionIfNeeded() error {
 	return m.DB.Create(m.session).Error
 }
 
-func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool), args ...string) (func(), error) {
+func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool), args ...string) (func() error, error) {
 	rawLog := db.MakeMkvLog{}
 	if err := m.DB.Model(m.session).Association("RawLog").Append(&rawLog); err != nil {
 		return nil, err
@@ -56,9 +56,9 @@ func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool),
 	}
 
 	wg := sync.WaitGroup{}
-	wait := func() {
+	wait := func() error {
 		wg.Wait()
-		process.Wait()
+		return process.Wait()
 	}
 
 	wg.Add(1)
@@ -141,7 +141,8 @@ func (m *MakeMkv) ScanDrive() ([]*Drive, error) {
 	if err != nil {
 		return nil, err
 	}
-	wait()
+	// Since we're calling an invalid command, we expect an error here.
+	wait() //nolint:errcheck
 
 	return result, nil
 }
@@ -193,7 +194,9 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	if err != nil {
 		return nil, err
 	}
-	wait()
+	if err := wait(); err != nil {
+		return nil, err
+	}
 
 	if discInfo == nil {
 		return nil, fmt.Errorf("internal error occurred, no disc info found")
@@ -244,7 +247,10 @@ func (m *MakeMkv) Rip(drive *Drive, plan *Plan, cb func(msg *StreamResult, eof b
 		if err != nil {
 			return err
 		}
-		wait()
+		if err := wait(); err != nil {
+			return err
+		}
+
 		src := filepath.Join(destDir, plan.DiscInfo.Titles[title.TitleIndex].OutputFileName)
 		dst := filepath.Join(destDir, fmt.Sprintf("%s (%d).mkv", plan.Identity.GetPrimaryTitle(), plan.Identity.GetStartYear()))
 		log.Printf("Renaming %s to %s\n", src, dst)

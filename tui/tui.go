@@ -29,7 +29,7 @@ type model struct {
 }
 
 type Eof struct {
-	empty int
+	_ int
 }
 
 func (m *model) detail() string {

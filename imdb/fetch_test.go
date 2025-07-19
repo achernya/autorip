@@ -12,21 +12,23 @@ func TestFetchSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer listener.Close() //nolint:errcheck
 
 	addr := listener.Addr().(*net.TCPAddr)
 	datasetSource = fmt.Sprintf("http://localhost:%d/", addr.Port)
 
 	src := newTmpDir(t)
 	defer src.Cleanup()
-	copyTestData(src.dir)
+	if err := copyTestData(src.dir); err != nil {
+		t.Fatal(err)
+	}
 
 	http.Handle("/", http.FileServer(http.Dir(src.dir)))
 	go func() {
 		select {
 		case <-t.Context().Done():
 		default:
-			http.Serve(listener, nil)
+			http.Serve(listener, nil) //nolint:errcheck
 		}
 	}()
 

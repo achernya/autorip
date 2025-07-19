@@ -29,6 +29,9 @@ var ripCmd = &cobra.Command{
 			return err
 		}
 		analysis, err := analyze(mkv, drives)
+		if err != nil {
+			return err
+		}
 		plan, err := makemkv.MakePlan(analysis.DiscInfo)
 		if err != nil {
 			return err

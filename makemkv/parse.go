@@ -269,7 +269,7 @@ func updateGenericInfo(info *GenericInfo, records []string) error {
 func parseMessage(records []string) (*Message, error) {
 	const columns = 5
 	if len(records) < columns {
-		return nil, fmt.Errorf("Unexpected number of columns for message: got %+v, want %d", records, columns)
+		return nil, fmt.Errorf("unexpected number of columns for message: got %+v, want %d", records, columns)
 	}
 	code, err := strconv.Atoi(records[0])
 	if err != nil {
@@ -296,7 +296,7 @@ func parseMessage(records []string) (*Message, error) {
 func parseProgress(progressType int, records []string) (*ProgressTitle, error) {
 	const columns = 3
 	if len(records) != columns {
-		return nil, fmt.Errorf("Unexpected number of columns for progress title: got %+v, want %d", records, columns)
+		return nil, fmt.Errorf("unexpected number of columns for progress title: got %+v, want %d", records, columns)
 	}
 	code, err := strconv.Atoi(records[0])
 	if err != nil {
@@ -317,7 +317,7 @@ func parseProgress(progressType int, records []string) (*ProgressTitle, error) {
 func parseProgressUpdate(records []string) (*ProgressUpdate, error) {
 	const columns = 3
 	if len(records) != columns {
-		return nil, fmt.Errorf("Unexpected number of columns for progress update: got %+v, want %d", records, columns)
+		return nil, fmt.Errorf("unexpected number of columns for progress update: got %+v, want %d", records, columns)
 	}
 	current, err := strconv.Atoi(records[0])
 	if err != nil {
@@ -342,7 +342,7 @@ func parseProgressUpdate(records []string) (*ProgressUpdate, error) {
 func parseDrive(records []string) (*Drive, error) {
 	const columns = 7
 	if len(records) != columns {
-		return nil, fmt.Errorf("Unexpected number of columns for progress update: got %+v, want %d", records, columns)
+		return nil, fmt.Errorf("unexpected number of columns for progress update: got %+v, want %d", records, columns)
 	}
 	index, err := strconv.Atoi(records[0])
 	if err != nil {
@@ -388,7 +388,7 @@ func (m *MakeMkvParser) parseRecord() (*StreamResult, error) {
 	r := csv.NewReader(strings.NewReader(rest))
 	records, err := r.Read()
 	if err != nil {
-		return nil, fmt.Errorf("Unable to parse line %+v: %w", rest, err)
+		return nil, fmt.Errorf("unable to parse line %+v: %w", rest, err)
 	}
 	switch msgType {
 	case MessageTag:
@@ -425,7 +425,10 @@ func (m *MakeMkvParser) parseRecord() (*StreamResult, error) {
 			return nil, err
 		}
 		ensureStreams(m.discInfo, title, stream)
-		updateGenericInfo(&m.discInfo.Titles[title].Streams[stream].GenericInfo, records[2:])
+		err = updateGenericInfo(&m.discInfo.Titles[title].Streams[stream].GenericInfo, records[2:])
+		if err != nil {
+			return nil, err
+		}
 	case TitleInfoTag:
 		m.infoSeen = true
 		title, err := strconv.Atoi(records[0])
@@ -433,10 +436,16 @@ func (m *MakeMkvParser) parseRecord() (*StreamResult, error) {
 			return nil, err
 		}
 		ensureTitles(m.discInfo, title)
-		updateGenericInfo(&m.discInfo.Titles[title].GenericInfo, records[1:])
+		err = updateGenericInfo(&m.discInfo.Titles[title].GenericInfo, records[1:])
+		if err != nil {
+			return nil, err
+		}
 	case DiscInfoTag:
 		m.infoSeen = true
-		updateGenericInfo(&m.discInfo.GenericInfo, records[0:])
+		err := updateGenericInfo(&m.discInfo.GenericInfo, records[0:])
+		if err != nil {
+			return nil, err
+		}
 	case TitleCountTag:
 		// We don't actually care about `TCOUNT`, so we can just ignore it.
 	default:

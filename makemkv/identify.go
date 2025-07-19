@@ -218,15 +218,16 @@ func XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
 	// Also escape `-` since that is a negation character.
 	query = strings.ReplaceAll(query, "-", "\\-")
 	log.Printf("Searching %+q\n", query)
-	ctx, cancel := context.WithCancel(context.Background())
 	// TODO(achernya): pass in dir.
 	index, err := imdb.OpenIndex(".")
 	if err != nil {
 		return nil, err
 	}
 	defer index.Close()
+	ctx, cancel := context.WithCancel(context.Background())
 	ch, err := index.Search(ctx, query)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	defer cancel()

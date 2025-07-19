@@ -157,7 +157,7 @@ func NewIndex(dir string) (*Index, error) {
 	mapping.ScoringModel = "bm25"
 	index, err := bleve.New(path.Join(idx.dir, imdbBleve), mapping)
 	if err != nil {
-		idx.ldb.Close()
+		idx.ldb.Close() //nolint:errcheck
 		return nil, err
 	}
 	idx.index = index
@@ -177,7 +177,7 @@ func OpenIndex(dir string) (*Index, error) {
 		"read_only": true,
 	})
 	if err != nil {
-		idx.ldb.Close()
+		idx.ldb.Close() //nolint:errcheck
 		return nil, err
 	}
 	idx.index = index
@@ -186,7 +186,7 @@ func OpenIndex(dir string) (*Index, error) {
 }
 
 func (i *Index) findTitle(title string) (*pb.Title, error) {
-	it := i.ldb.NewIterator(&util.Range{key(title), nil}, nil)
+	it := i.ldb.NewIterator(&util.Range{Start: key(title), Limit: nil}, nil)
 	if !it.First() {
 		return nil, fmt.Errorf("could not find key %+v", title)
 	}
@@ -250,7 +250,7 @@ func (i *Index) loadTitles() error {
 	if err != nil {
 		return err
 	}
-	defer scanner.Close()
+	defer scanner.Close() //nolint:errcheck
 
 	tx, err := i.ldb.OpenTransaction()
 	if err != nil {
@@ -305,7 +305,7 @@ func (i *Index) loadEpisodes() error {
 	if err != nil {
 		return err
 	}
-	defer scanner.Close()
+	defer scanner.Close() //nolint:errcheck
 
 	tx, err := i.ldb.OpenTransaction()
 	if err != nil {
@@ -350,11 +350,13 @@ func (i *Index) loadEpisodes() error {
 }
 
 func (i *Index) makeSearch() error {
+	// NOTE: any content that does not have a rating will not be
+	// indexed by full-text search!
 	scanner, err := newImdbTsv(path.Join(i.dir, ratings))
 	if err != nil {
 		return err
 	}
-	defer scanner.Close()
+	defer scanner.Close() //nolint:errcheck
 
 	count := 0
 	batch := i.index.NewBatch()
@@ -387,7 +389,9 @@ func (i *Index) makeSearch() error {
 			return err
 		}
 		entry.NumVotes = votes
-		batch.Index(record[0], entry)
+		if err := batch.Index(record[0], entry); err != nil {
+			return err
+		}
 		count++
 		if count == batchSize {
 			if err := i.index.Batch(batch); err != nil {
@@ -415,7 +419,7 @@ func (i *Index) makeLevelDb() error {
 	}
 
 	log.Println("Compacting")
-	if err := i.ldb.CompactRange(util.Range{nil, nil}); err != nil {
+	if err := i.ldb.CompactRange(util.Range{Start: nil, Limit: nil}); err != nil {
 		return err
 	}
 	log.Println("Done")
@@ -448,6 +452,7 @@ func (i *Index) Search(ctx context.Context, query string) (<-chan *pb.Result, er
 
 	ch := make(chan *pb.Result)
 	go func() {
+	out:
 		for _, hit := range searchResult.Hits {
 			result := &pb.Result{}
 			entry, err := i.findTitle(hit.ID)
@@ -462,7 +467,7 @@ func (i *Index) Search(ctx context.Context, query string) (<-chan *pb.Result, er
 			result.SetAverageRating(float32(hit.Fields["AverageRating"].(float64)))
 			select {
 			case <-ctx.Done():
-				break
+				break out
 			case ch <- result:
 			}
 		}
@@ -479,6 +484,7 @@ func (i *Index) SearchJSON(query string, maxResults int) (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch, err := i.Search(ctx, query)
 	if err != nil {
+		cancel()
 		return "", err
 	}
 	for len(results.GetResult()) < maxResults {
@@ -502,9 +508,9 @@ func (i *Index) Close() {
 		return
 	}
 	if i.index != nil {
-		i.index.Close()
+		i.index.Close() //nolint:errcheck
 	}
 	if i.ldb != nil {
-		i.ldb.Close()
+		i.ldb.Close() //nolint:errcheck
 	}
 }

@@ -18,7 +18,9 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&makemkvcon, "makemkvcon", "", "path to makemkvcon executable")
-	rootCmd.MarkPersistentFlagRequired("makemkvcon")
+	if err := rootCmd.MarkPersistentFlagRequired("makemkvcon"); err != nil {
+		panic(err)
+	}
 }
 
 func Execute() {

@@ -65,5 +65,5 @@ func (m *MakeMkvProcess) Wait() error {
 }
 
 func (m *MakeMkvProcess) Kill() {
-	m.cmd.Process.Kill()
+	m.cmd.Process.Kill() //nolint:errcheck
 }
