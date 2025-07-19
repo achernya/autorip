@@ -33,7 +33,13 @@ var (
 			if err != nil {
 				return err
 			}
-			return imdb.MakeIndex(".")
+			// TODO(achernya): Proper dir handling
+			index, err := imdb.NewIndex(".")
+			if err != nil {
+				return err
+			}
+			defer index.Close()
+			return index.Build()
 		},
 	}
 	searchCmd = &cobra.Command{
@@ -41,7 +47,11 @@ var (
 		Short: "Look up a given IMDb entry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := imdb.SearchJSON(args[0], maxResults)
+			index, err := imdb.OpenIndex(".")
+			if err != nil {
+				return err
+			}
+			result, err := index.SearchJSON(args[0], maxResults)
 			if err != nil {
 				return err
 			}

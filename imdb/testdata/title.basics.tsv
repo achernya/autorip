@@ -1,0 +1,5 @@
+tconst	titleType	primaryTitle	originalTitle	isAdult	startYear	endYear	runtimeMinutes	genres
+tt0000001	short	Carmencita	Carmencita	0	1894	\N	1	Documentary,Short
+tt0041069	tvSeries	The Voice of Firestone	The Voice of Firestone	0	1949	1963	30	Music
+tt1563488	tvEpisode	Episode #1.1	Episode #1.1	0	1949	\N	\N	Music
+tt1832219	tvEpisode	Episode #1.2	Episode #1.2	0	1949	\N	\N	Music

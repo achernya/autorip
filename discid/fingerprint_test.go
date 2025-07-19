@@ -80,6 +80,13 @@ func TestSerialize(t *testing.T) {
 		})
 	}
 }
+func TestFingerprintNullDisc(t *testing.T) {
+	var d *Disc = nil
+	_, err := Fingerprint(d)
+	if err == nil {
+		t.Errorf("Passed in nil disc but got no error")
+	}
+}
 
 func TestFingerprint(t *testing.T) {
 	tests := map[string]struct {

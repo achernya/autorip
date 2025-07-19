@@ -56,6 +56,11 @@ $(COVERAGE_REPORT): $(COVERAGE_PROFILE)
 .PHONY: coverage
 coverage: $(COVERAGE_REPORT)
 
+.PHONY: fix
+fix:
+	go fmt ./...
+	go fix ./...
+
 .PHONY: clean
 clean:
 	-rm $(COVERAGE_PROFILE)

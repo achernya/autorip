@@ -219,7 +219,13 @@ func XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
 	query = strings.ReplaceAll(query, "-", "\\-")
 	log.Printf("Searching %+q\n", query)
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := imdb.Search(ctx, query)
+	// TODO(achernya): pass in dir.
+	index, err := imdb.OpenIndex(".")
+	if err != nil {
+		return nil, err
+	}
+	defer index.Close()
+	ch, err := index.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}

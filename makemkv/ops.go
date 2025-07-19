@@ -233,7 +233,7 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	return analysis, nil
 }
 
-const destDir = "/Users/achernya/Rip"
+const destDir = "/Volumes/achernya/Rip"
 
 func (m *MakeMkv) Rip(drive *Drive, plan *Plan, cb func(msg *StreamResult, eof bool)) error {
 	if err := m.sessionIfNeeded(); err != nil {

@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	datasetSource = "https://datasets.imdbws.com/"
-	basics        = "title.basics.tsv.gz"
-	episodes      = "title.episode.tsv.gz"
-	ratings       = "title.ratings.tsv.gz"
+	basics   = "title.basics.tsv.gz"
+	episodes = "title.episode.tsv.gz"
+	ratings  = "title.ratings.tsv.gz"
 )
 
 var (
-	desiredFiles = [...]string{
+	// datasetSource is really a constant, but is a variable for testing to inject the fake.
+	datasetSource = "https://datasets.imdbws.com/"
+	desiredFiles  = [...]string{
 		// Basic information about the content, including its unique identifier and title.
 		basics,
 		// Association between a `tvSeries` and a `tvEpisode`.

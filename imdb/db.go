@@ -24,8 +24,49 @@ import (
 )
 
 const (
-	batchSize = 100000
+	batchSize   = 100000
+	imdbLevelDb = "imdb.leveldb"
+	imdbBleve   = "imdb.bleve"
 )
+
+// imdbTsv stores all of the components needed to read line-by-line
+// from a tsv.gz. gzip.Reader does not Close the underlying io.Reader,
+// and bufio.Scanner does not expose a Close method at all, so this
+// struct bundles them together.
+type imdbTsv struct {
+	underlying *os.File
+	gzipReader *gzip.Reader
+	scanner    *bufio.Scanner
+}
+
+// newImdbTsv opens a tsv.gz file for reading.
+func newImdbTsv(filename string) (*imdbTsv, error) {
+	fgz, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	f, err := gzip.NewReader(fgz)
+	if err != nil {
+		return nil, err
+	}
+	scanner := bufio.NewScanner(f)
+	// Consume the header
+	scanner.Scan()
+	return &imdbTsv{
+		underlying: fgz,
+		gzipReader: f,
+		scanner:    scanner,
+	}, nil
+
+}
+
+// Close closes the tsv.gz file, including reporting gzip checksum errors.
+func (i *imdbTsv) Close() error {
+	if err := i.gzipReader.Close(); err != nil {
+		return err
+	}
+	return i.underlying.Close()
+}
 
 func key(keys ...string) []byte {
 	return []byte(strings.Join(keys, ","))
@@ -62,14 +103,90 @@ func episodesSort(a, b *pb.Title) int {
 	if a.GetSeasonNumber() == b.GetSeasonNumber() {
 		if !a.HasEpisodeNumber() || !b.HasEpisodeNumber() {
 			// Incomparable
+			return 0
 		}
 		return cmp.Compare(a.GetEpisodeNumber(), b.GetEpisodeNumber())
 	}
 	return cmp.Compare(a.GetSeasonNumber(), b.GetSeasonNumber())
 }
 
-func findTitle(ldb *leveldb.DB, title string) (*pb.Title, error) {
-	it := ldb.NewIterator(&util.Range{key(title), nil}, nil)
+// Index is a LevelDB and Blevesearch index for the IMDB data.
+type Index struct {
+	dir   string
+	ldb   *leveldb.DB
+	index bleve.Index
+}
+
+func (i *Index) openLevelDb(read bool) error {
+	options := &opt.Options{
+		// Ideally we'd use zstd here, but it's not available.
+		Compression: opt.SnappyCompression,
+	}
+	if read {
+		// Database should already exist
+		options.ErrorIfExist = false
+		options.ErrorIfMissing = true
+		// We won't do any writes here.
+		options.ReadOnly = true
+	} else {
+		// We expect to create the database here.
+		options.ErrorIfExist = true
+		options.ErrorIfMissing = false
+	}
+	ldb, err := leveldb.OpenFile(path.Join(i.dir, imdbLevelDb), options)
+	if err != nil {
+		return err
+	}
+	i.ldb = ldb
+	return nil
+}
+
+// NewIndex prepares an index for population. If you want to query the
+// index, use OpenIndex instead.
+func NewIndex(dir string) (*Index, error) {
+	idx := &Index{
+		dir: dir,
+	}
+	if err := idx.openLevelDb(false); err != nil {
+		return nil, err
+	}
+	mapping := bleve.NewIndexMapping()
+	mapping.DefaultField = "Title"
+	mapping.TypeField = "type"
+	mapping.DefaultAnalyzer = "en"
+	mapping.ScoringModel = "bm25"
+	index, err := bleve.New(path.Join(idx.dir, imdbBleve), mapping)
+	if err != nil {
+		idx.ldb.Close()
+		return nil, err
+	}
+	idx.index = index
+	return idx, nil
+}
+
+// OpenIndex opens an index for queries. If you want to create a new
+// index, use NewIndex instead.
+func OpenIndex(dir string) (*Index, error) {
+	idx := &Index{
+		dir: dir,
+	}
+	if err := idx.openLevelDb(true); err != nil {
+		return nil, err
+	}
+	index, err := bleve.OpenUsing(path.Join(dir, imdbBleve), map[string]interface{}{
+		"read_only": true,
+	})
+	if err != nil {
+		idx.ldb.Close()
+		return nil, err
+	}
+	idx.index = index
+	return idx, nil
+
+}
+
+func (i *Index) findTitle(title string) (*pb.Title, error) {
+	it := i.ldb.NewIterator(&util.Range{key(title), nil}, nil)
 	if !it.First() {
 		return nil, fmt.Errorf("could not find key %+v", title)
 	}
@@ -115,7 +232,7 @@ func findTitle(ldb *leveldb.DB, title string) (*pb.Title, error) {
 
 	// Fill in per-episode data
 	for _, episode := range entry.GetEpisodes() {
-		subentry, err := lookup(ldb, episode.GetTConst())
+		subentry, err := lookup(i.ldb, episode.GetTConst())
 		if err != nil {
 			return nil, err
 		}
@@ -128,36 +245,22 @@ func findTitle(ldb *leveldb.DB, title string) (*pb.Title, error) {
 	return entry, nil
 }
 
-func imdbScanner(dir string, filename string) (*bufio.Scanner, error) {
-	fgz, err := os.Open(path.Join(dir, filename))
-	if err != nil {
-		return nil, err
-	}
-	f, err := gzip.NewReader(fgz)
-	if err != nil {
-		return nil, err
-	}
-	scanner := bufio.NewScanner(f)
-	// Consume the header
-	scanner.Scan()
-	return scanner, nil
-}
-
-func loadTitles(ldb *leveldb.DB, dir string) error {
-	scanner, err := imdbScanner(dir, basics)
+func (i *Index) loadTitles() error {
+	scanner, err := newImdbTsv(path.Join(i.dir, basics))
 	if err != nil {
 		return err
 	}
+	defer scanner.Close()
 
-	tx, err := ldb.OpenTransaction()
+	tx, err := i.ldb.OpenTransaction()
 	if err != nil {
 		return err
 	}
 	count := 0
 	batch := leveldb.Batch{}
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for scanner.scanner.Scan() {
+		line := scanner.scanner.Text()
 		record := strings.Split(line, "\t")
 		title := pb.Title_builder{
 			TitleType:     proto.String(record[1]),
@@ -197,21 +300,22 @@ func loadTitles(ldb *leveldb.DB, dir string) error {
 	return tx.Commit()
 }
 
-func loadEpisodes(ldb *leveldb.DB, dir string) error {
-	scanner, err := imdbScanner(dir, episodes)
+func (i *Index) loadEpisodes() error {
+	scanner, err := newImdbTsv(path.Join(i.dir, episodes))
 	if err != nil {
 		return err
 	}
+	defer scanner.Close()
 
-	tx, err := ldb.OpenTransaction()
+	tx, err := i.ldb.OpenTransaction()
 	if err != nil {
 		return err
 	}
 	count := 0
 	batch := leveldb.Batch{}
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for scanner.scanner.Scan() {
+		line := scanner.scanner.Text()
 		record := strings.Split(line, "\t")
 		tConst := record[0]
 		parentTConst := record[1]
@@ -245,39 +349,24 @@ func loadEpisodes(ldb *leveldb.DB, dir string) error {
 	return tx.Commit()
 }
 
-func makeSearch(dir string) error {
-	ldb, err := openLevelDb(true)
+func (i *Index) makeSearch() error {
+	scanner, err := newImdbTsv(path.Join(i.dir, ratings))
 	if err != nil {
 		return err
 	}
-
-	mapping := bleve.NewIndexMapping()
-	mapping.DefaultField = "Title"
-	mapping.TypeField = "type"
-	mapping.DefaultAnalyzer = "en"
-	mapping.ScoringModel = "bm25"
-	index, err := bleve.New("imdb.bleve", mapping)
-	if err != nil {
-		return err
-	}
-	defer index.Close()
-
-	scanner, err := imdbScanner(dir, ratings)
-	if err != nil {
-		return err
-	}
+	defer scanner.Close()
 
 	count := 0
-	batch := index.NewBatch()
+	batch := i.index.NewBatch()
 
 	log.Println("Making search index")
-	for scanner.Scan() {
-		line := scanner.Text()
+	for scanner.scanner.Scan() {
+		line := scanner.scanner.Text()
 		record := strings.Split(line, "\t")
 		if len(record) != 3 {
 			return fmt.Errorf("got %+v, want 3 columns", line)
 		}
-		l, err := lookup(ldb, record[0])
+		l, err := lookup(i.ldb, record[0])
 		if err != nil {
 			return err
 		}
@@ -301,90 +390,49 @@ func makeSearch(dir string) error {
 		batch.Index(record[0], entry)
 		count++
 		if count == batchSize {
-			if err := index.Batch(batch); err != nil {
+			if err := i.index.Batch(batch); err != nil {
 				return err
 			}
-			batch = index.NewBatch()
+			batch = i.index.NewBatch()
 			count = 0
 		}
 	}
 	log.Println("Done")
-	return index.Batch(batch)
+	return i.index.Batch(batch)
 }
 
-func openLevelDb(read bool) (*leveldb.DB, error) {
-	options := &opt.Options{
-		// Ideally we'd use zstd here, but it's not available.
-		Compression: opt.SnappyCompression,
-	}
-	if read {
-		// Database should already exist
-		options.ErrorIfExist = false
-		options.ErrorIfMissing = true
-		// We won't do any writes here.
-		options.ReadOnly = true
-	} else {
-		// We expect to create the database here.
-		options.ErrorIfExist = true
-		options.ErrorIfMissing = false
-	}
-	return leveldb.OpenFile("imdb.leveldb", options)
-}
-
-func openBleve(dir string) (bleve.Index, error) {
-	return bleve.OpenUsing("imdb.bleve", map[string]interface{}{
-		"read_only": true,
-	})
-}
-
-func makeImdb(dir string) error {
-	ldb, err := openLevelDb(false)
-	if err != nil {
-		return err
-	}
-	defer ldb.Close()
-
+func (i *Index) makeLevelDb() error {
 	// Load titles
 	log.Println("Loading titles")
-	if err := loadTitles(ldb, dir); err != nil {
+	if err := i.loadTitles(); err != nil {
 		return err
 	}
 
 	// Load episodes
 	log.Println("Loading episodes")
-	if err := loadEpisodes(ldb, dir); err != nil {
+	if err := i.loadEpisodes(); err != nil {
 		return err
 	}
 
 	log.Println("Compacting")
-	if err := ldb.CompactRange(util.Range{nil, nil}); err != nil {
+	if err := i.ldb.CompactRange(util.Range{nil, nil}); err != nil {
 		return err
 	}
 	log.Println("Done")
 	return nil
 }
 
-func MakeIndex(dir string) error {
-	if err := makeImdb(dir); err != nil {
+func (i *Index) Build() error {
+	if err := i.makeLevelDb(); err != nil {
 		return err
 	}
-	if err := makeSearch(dir); err != nil {
+	if err := i.makeSearch(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
-	ldb, err := openLevelDb(true)
-	if err != nil {
-		return nil, err
-	}
-	index, err := openBleve(".")
-	if err != nil {
-		return nil, err
-	}
-	defer index.Close()
-
+func (i *Index) Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
 	searchRequest := bleve.NewSearchRequest(bleve.NewQueryStringQuery(query))
 	// For now, hard code the maximum results we're willing to
 	// return to 100. In an ideal world, we'd paginate 10 at a
@@ -393,7 +441,7 @@ func Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
 	searchRequest.Size = 100
 	searchRequest.Fields = []string{"NumVotes", "AverageRating"}
 	searchRequest.SortBy([]string{"-_score", "-NumVotes"})
-	searchResult, err := index.Search(searchRequest)
+	searchResult, err := i.index.Search(searchRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +450,7 @@ func Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
 	go func() {
 		for _, hit := range searchResult.Hits {
 			result := &pb.Result{}
-			entry, err := findTitle(ldb, hit.ID)
+			entry, err := i.findTitle(hit.ID)
 			if err != nil {
 				log.Println(err)
 				break
@@ -424,12 +472,12 @@ func Search(ctx context.Context, query string) (<-chan *pb.Result, error) {
 	return ch, nil
 }
 
-func SearchJSON(query string, maxResults int) (string, error) {
+func (i *Index) SearchJSON(query string, maxResults int) (string, error) {
 	results := &pb.Results{}
 	results.SetResult(make([]*pb.Result, 0))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := Search(ctx, query)
+	ch, err := i.Search(ctx, query)
 	if err != nil {
 		return "", err
 	}
@@ -447,5 +495,16 @@ func SearchJSON(query string, maxResults int) (string, error) {
 		return "", err
 	}
 	return string(s), nil
+}
 
+func (i *Index) Close() {
+	if i == nil {
+		return
+	}
+	if i.index != nil {
+		i.index.Close()
+	}
+	if i.ldb != nil {
+		i.ldb.Close()
+	}
 }
