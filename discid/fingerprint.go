@@ -1,8 +1,10 @@
 package discid
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"fmt"
+	"slices"
 
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"
@@ -23,7 +25,7 @@ type Disc struct {
 	Name string
 	// Titles represents the contents of the disc. In the case of
 	// a blu-ray, it's .mpls playlists.
-	Titles []Title
+	Titles []*Title
 }
 
 // Title represents a single Disc title (or track).
@@ -45,6 +47,10 @@ func Serialize(d *Disc) ([]byte, error) {
 	if d == nil {
 		return nil, fmt.Errorf("input must not be nil")
 	}
+	// Sort all of the filenames, otherwise a permutation could result in a different answer.
+	slices.SortFunc(d.Titles, func(a, b *Title) int {
+		return cmp.Compare(a.Filename, b.Filename)
+	})
 	b := cryptobyte.NewBuilder(make([]byte, 0, 16))
 	b.AddASN1(asn1.SEQUENCE, func(outer *cryptobyte.Builder) {
 		outer.AddASN1OctetString([]byte(d.Name))

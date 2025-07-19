@@ -33,7 +33,7 @@ func TestSerialize(t *testing.T) {
 		},
 		"just title": {
 			input: &Disc{
-				Titles: []Title{{}},
+				Titles: []*Title{{}},
 			},
 			// SEQUENCE { OCTET_STRING {} SEQUENCE { SEQUENCE { OCTET_STRING {} INTEGER { 0 } OCTET_STRING {} } } }
 			expected: []byte{0x30, 0x0d, 0x04, 0x00, 0x30, 0x09, 0x30, 0x07, 0x04, 0x00, 0x02, 0x01, 0x00, 0x04, 0x00},
@@ -41,7 +41,7 @@ func TestSerialize(t *testing.T) {
 		"full disc": {
 			input: &Disc{
 				Name: "Disc 1",
-				Titles: []Title{{
+				Titles: []*Title{{
 					Filename: "00000.mpls",
 					Size:     1234,
 					Duration: "00:00:01",
@@ -89,7 +89,7 @@ func TestFingerprint(t *testing.T) {
 		"full disc": {
 			input: &Disc{
 				Name: "Disc 1",
-				Titles: []Title{{
+				Titles: []*Title{{
 					Filename: "00000.mpls",
 					Size:     1234,
 					Duration: "00:00:01",
@@ -114,5 +114,43 @@ func TestFingerprint(t *testing.T) {
 				t.Errorf("got %x; want %x", enc, tt.expected)
 			}
 		})
+	}
+}
+
+func TestAlternateOrdersSameFingerprint(t *testing.T) {
+	d1 := &Disc{
+		Titles: []*Title{{
+			Filename: "00000.mpls",
+			Size:     1234,
+			Duration: "00:00:01",
+		}, {
+			Filename: "00001.mpls",
+			Size:     5678,
+			Duration: "01:00:00",
+		}},
+	}
+	d2 := &Disc{
+		Titles: []*Title{{
+			Filename: "00001.mpls",
+			Size:     5678,
+			Duration: "01:00:00",
+		}, {
+			Filename: "00000.mpls",
+			Size:     1234,
+			Duration: "00:00:01",
+		}},
+	}
+	f1, err := Fingerprint(d1)
+	if err != nil {
+		t.Errorf("unexpected error when fingerprinting %+v", err.Error())
+		return
+	}
+	f2, err := Fingerprint(d2)
+	if err != nil {
+		t.Errorf("unexpected error when fingerprinting %+v", err.Error())
+		return
+	}
+	if !bytes.Equal(f1, f2) {
+		t.Errorf("serialization was not order-agnostic")
 	}
 }

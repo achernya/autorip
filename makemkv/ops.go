@@ -96,10 +96,10 @@ func (m *MakeMkv) run(ctx context.Context, cb func(msg *StreamResult, eof bool),
 func discInfoToFingerprint(discInfo *DiscInfo) ([]byte, error) {
 	disc := &discid.Disc{
 		Name:   discInfo.VolumeName,
-		Titles: make([]discid.Title, 0),
+		Titles: make([]*discid.Title, 0),
 	}
 	for _, t := range discInfo.Titles {
-		title := discid.Title{
+		title := &discid.Title{
 			Filename: t.SourceFileName,
 			Duration: t.Duration,
 		}
