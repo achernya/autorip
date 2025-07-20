@@ -113,7 +113,7 @@ func episodesSort(a, b *pb.Title) int {
 // GenericIndex is an interface that Index satisfies. It primarily
 // exists to allow mocking. Prefer to accept GenericIndex rather than
 // the concrete implementation Index, below.
-type GenericIndex interface{
+type GenericIndex interface {
 	Build() error
 	Search(ctx context.Context, query string) (<-chan *pb.Result, error)
 	SearchJSON(query string, maxResults int) (string, error)

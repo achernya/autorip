@@ -382,7 +382,7 @@ func TestXrefImdb(t *testing.T) {
 					}.Build(),
 					pb.Result_builder{
 						Entry: pb.Title_builder{
-							TitleType:      proto.String("tvSeries"),
+							TitleType: proto.String("tvSeries"),
 						}.Build(),
 					}.Build(),
 					pb.Result_builder{

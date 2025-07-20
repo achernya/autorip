@@ -72,7 +72,7 @@ var analyzeCmd = &cobra.Command{
 		}
 		// TODO(achernya): fix dir
 		index, err := imdb.OpenIndex(".")
-		if err != nil{
+		if err != nil {
 			return err
 		}
 		defer index.Close()

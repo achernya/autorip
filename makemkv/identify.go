@@ -34,7 +34,7 @@ var (
 	}
 )
 
-type Identifier struct{
+type Identifier struct {
 	index imdb.GenericIndex
 }
 
@@ -104,7 +104,7 @@ func scoreAspects(aspects []Aspect) int {
 //
 // It is possible (and in the case of a tvSeries, likely) that there
 // will be multiple titles that have these properties.
-func (i* Identifier) FilterDiscInfo(di *DiscInfo) map[int]*TitleInfo {
+func (i *Identifier) FilterDiscInfo(di *DiscInfo) map[int]*TitleInfo {
 	result := make(map[int]*TitleInfo)
 	for index, ti := range di.Titles {
 		result[index] = &ti
