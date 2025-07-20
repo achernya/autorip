@@ -23,7 +23,7 @@ var ripCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		mkv := makemkv.New(d, makemkvcon)
+		mkv := makemkv.New(d, makemkvcon, destDir)
 		drives, err := scan(mkv)
 		if err != nil {
 			return err

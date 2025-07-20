@@ -10,6 +10,7 @@ import (
 
 var (
 	makemkvcon = ""
+	destDir    = ""
 	rootCmd    = &cobra.Command{
 		Use:   "autorip",
 		Short: "autorip is a tool to manage ripping media",
@@ -18,7 +19,11 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&makemkvcon, "makemkvcon", "", "path to makemkvcon executable")
+	rootCmd.PersistentFlags().StringVar(&destDir, "destdir", "", "path to destination directory")
 	if err := rootCmd.MarkPersistentFlagRequired("makemkvcon"); err != nil {
+		panic(err)
+	}
+	if err := rootCmd.MarkPersistentFlagRequired("destdir"); err != nil {
 		panic(err)
 	}
 }

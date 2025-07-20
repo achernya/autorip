@@ -20,12 +20,14 @@ type MakeMkv struct {
 	DB         *gorm.DB
 	makemkvcon string
 	session    *db.Session
+	dest       string
 }
 
-func New(d *gorm.DB, makemkvcon string) *MakeMkv {
+func New(d *gorm.DB, makemkvcon string, dest string) *MakeMkv {
 	return &MakeMkv{
 		DB:         d,
 		makemkvcon: makemkvcon,
+		dest:       dest,
 	}
 }
 
@@ -236,14 +238,12 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	return analysis, nil
 }
 
-const destDir = "/Volumes/achernya/Rip"
-
 func (m *MakeMkv) Rip(drive *Drive, plan *Plan, cb func(msg *StreamResult, eof bool)) error {
 	if err := m.sessionIfNeeded(); err != nil {
 		return err
 	}
 	for _, title := range plan.RipTitles {
-		wait, err := m.run(context.Background(), cb, "--noscan", "mkv", fmt.Sprintf("disc:%d", drive.Index), fmt.Sprintf("%d", title.TitleIndex), destDir)
+		wait, err := m.run(context.Background(), cb, "--noscan", "mkv", fmt.Sprintf("disc:%d", drive.Index), fmt.Sprintf("%d", title.TitleIndex), m.dest)
 		if err != nil {
 			return err
 		}
@@ -251,8 +251,8 @@ func (m *MakeMkv) Rip(drive *Drive, plan *Plan, cb func(msg *StreamResult, eof b
 			return err
 		}
 
-		src := filepath.Join(destDir, plan.DiscInfo.Titles[title.TitleIndex].OutputFileName)
-		dst := filepath.Join(destDir, fmt.Sprintf("%s (%d).mkv", plan.Identity.GetPrimaryTitle(), plan.Identity.GetStartYear()))
+		src := filepath.Join(m.dest, plan.DiscInfo.Titles[title.TitleIndex].OutputFileName)
+		dst := filepath.Join(m.dest, fmt.Sprintf("%s (%d).mkv", plan.Identity.GetPrimaryTitle(), plan.Identity.GetStartYear()))
 		log.Printf("Renaming %s to %s\n", src, dst)
 		err = os.Rename(src, dst)
 		if err != nil {
