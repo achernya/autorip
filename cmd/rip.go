@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/achernya/autorip/db"
+	"github.com/achernya/autorip/imdb"
 	"github.com/achernya/autorip/makemkv"
 	"github.com/achernya/autorip/tui"
 	"github.com/spf13/cobra"
@@ -19,6 +20,7 @@ var ripCmd = &cobra.Command{
 	Use:   "rip",
 	Short: "Auto-detect the inserted disc and rip it",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// TODO(achernya): fix dir
 		d, err := db.OpenDB("autorip.sqlite")
 		if err != nil {
 			return err
@@ -32,7 +34,14 @@ var ripCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		plan, err := makemkv.MakePlan(analysis.DiscInfo)
+		// TODO(achernya): fix dir
+		index, err := imdb.OpenIndex(".")
+		if err != nil {
+			return err
+		}
+		defer index.Close()
+		i := makemkv.NewIdentifier(index)
+		plan, err := i.MakePlan(analysis.DiscInfo)
 		if err != nil {
 			return err
 		}

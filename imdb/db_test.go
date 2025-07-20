@@ -49,8 +49,8 @@ func TestCantOverwriteExistingIndex(t *testing.T) {
 	index, err = NewIndex(dir.dir)
 	if err == nil {
 		t.Error("unexpectedly succeeded in overwriting the index")
+		index.Close()
 	}
-	defer index.Close()
 }
 
 func copyTestData(dir string) error {

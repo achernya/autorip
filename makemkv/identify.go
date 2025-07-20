@@ -34,12 +34,22 @@ var (
 	}
 )
 
+type Identifier struct{
+	index imdb.GenericIndex
+}
+
+func NewIdentifier(index imdb.GenericIndex) *Identifier {
+	return &Identifier{
+		index: index,
+	}
+}
+
 type Aspect struct {
 	Score       int
 	Description string
 }
 
-func AspectsOf(ti *TitleInfo) []Aspect {
+func (i *Identifier) AspectsOf(ti *TitleInfo) []Aspect {
 	result := make([]Aspect, 0)
 	hasVideo := false
 	hasAudio := false
@@ -94,7 +104,7 @@ func scoreAspects(aspects []Aspect) int {
 //
 // It is possible (and in the case of a tvSeries, likely) that there
 // will be multiple titles that have these properties.
-func FilterDiscInfo(di *DiscInfo) map[int]*TitleInfo {
+func (i* Identifier) FilterDiscInfo(di *DiscInfo) map[int]*TitleInfo {
 	result := make(map[int]*TitleInfo)
 	for index, ti := range di.Titles {
 		result[index] = &ti
@@ -102,7 +112,7 @@ func FilterDiscInfo(di *DiscInfo) map[int]*TitleInfo {
 	aspects := make(map[int][]Aspect)
 	maxScore := 0
 	for index, ti := range result {
-		aspects[index] = AspectsOf(ti)
+		aspects[index] = i.AspectsOf(ti)
 		score := scoreAspects(aspects[index])
 		if score > maxScore {
 			maxScore = score
@@ -139,6 +149,8 @@ func parseHhMmSs(in string) (time.Duration, error) {
 	}
 	sub, err := time.Parse(time.TimeOnly, "00:00:00")
 	if err != nil {
+		// This is a static constant...if we can't parse this,
+		// we have bigger issues and need to abort.
 		panic(err)
 	}
 	return t.Sub(sub), nil
@@ -151,7 +163,7 @@ func parseHhMmSs(in string) (time.Duration, error) {
 //
 // The input to this function should be the filtered map produced by
 // FilterDiscInfo.
-func DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, error) {
+func (i *Identifier) DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, error) {
 	scores := make([]*Score, 0)
 	for index, title := range titles {
 		dur, err := parseHhMmSs(title.Duration)
@@ -209,7 +221,7 @@ func DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, error) {
 	return scores, nil
 }
 
-func XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
+func (i *Identifier) XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
 	// volume names have '_' instead of ' ', but we need the
 	// search terms to be seperated by spaces to work well.
 	query := strings.ReplaceAll(di.Name, "_", " ")
@@ -218,14 +230,8 @@ func XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
 	// Also escape `-` since that is a negation character.
 	query = strings.ReplaceAll(query, "-", "\\-")
 	log.Printf("Searching %+q\n", query)
-	// TODO(achernya): pass in dir.
-	index, err := imdb.OpenIndex(".")
-	if err != nil {
-		return nil, err
-	}
-	defer index.Close()
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, err := index.Search(ctx, query)
+	ch, err := i.index.Search(ctx, query)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -266,13 +272,13 @@ type Plan struct {
 	RipTitles []*Score
 }
 
-func MakePlan(discInfo *DiscInfo) (*Plan, error) {
-	titles := FilterDiscInfo(discInfo)
-	likely, err := DiscLikelyContains(titles)
+func (i *Identifier) MakePlan(discInfo *DiscInfo) (*Plan, error) {
+	titles := i.FilterDiscInfo(discInfo)
+	likely, err := i.DiscLikelyContains(titles)
 	if err != nil {
 		return nil, err
 	}
-	identity, err := XrefImdb(discInfo, likely)
+	identity, err := i.XrefImdb(discInfo, likely)
 	if err != nil {
 		return nil, err
 	}

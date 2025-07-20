@@ -110,6 +110,16 @@ func episodesSort(a, b *pb.Title) int {
 	return cmp.Compare(a.GetSeasonNumber(), b.GetSeasonNumber())
 }
 
+// GenericIndex is an interface that Index satisfies. It primarily
+// exists to allow mocking. Prefer to accept GenericIndex rather than
+// the concrete implementation Index, below.
+type GenericIndex interface{
+	Build() error
+	Search(ctx context.Context, query string) (<-chan *pb.Result, error)
+	SearchJSON(query string, maxResults int) (string, error)
+	Close()
+}
+
 // Index is a LevelDB and Blevesearch index for the IMDB data.
 type Index struct {
 	dir   string
@@ -143,7 +153,7 @@ func (i *Index) openLevelDb(read bool) error {
 
 // NewIndex prepares an index for population. If you want to query the
 // index, use OpenIndex instead.
-func NewIndex(dir string) (*Index, error) {
+func NewIndex(dir string) (GenericIndex, error) {
 	idx := &Index{
 		dir: dir,
 	}
@@ -514,3 +524,5 @@ func (i *Index) Close() {
 		i.ldb.Close() //nolint:errcheck
 	}
 }
+
+var _ GenericIndex = (*Index)(nil)

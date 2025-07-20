@@ -33,7 +33,7 @@ var (
 			if err != nil {
 				return err
 			}
-			// TODO(achernya): Proper dir handling
+			// TODO(achernya): fix dir
 			index, err := imdb.NewIndex(".")
 			if err != nil {
 				return err
