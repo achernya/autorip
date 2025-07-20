@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"path"
+	
 	"github.com/achernya/autorip/db"
 	"github.com/achernya/autorip/imdb"
 	"github.com/achernya/autorip/makemkv"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -56,12 +59,11 @@ var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
 	Short: "Auto-detect the inserted disc and analyze it",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO(achernya): fix dir
-		d, err := db.OpenDB("autorip.sqlite")
+		d, err := db.OpenDB(path.Join(viper.GetString(dbdir), "autorip.sqlite"))
 		if err != nil {
 			return err
 		}
-		mkv := makemkv.New(d, makemkvcon, destDir)
+		mkv := makemkv.New(d, viper.GetString(makemkvcon), viper.GetString(destdir))
 		drives, err := scan(mkv)
 		if err != nil {
 			return err
@@ -70,8 +72,7 @@ var analyzeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// TODO(achernya): fix dir
-		index, err := imdb.OpenIndex(".")
+		index, err := imdb.OpenIndex(viper.GetString(dbdir))
 		if err != nil {
 			return err
 		}

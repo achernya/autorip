@@ -6,6 +6,7 @@ import (
 
 	"github.com/achernya/autorip/imdb"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -29,12 +30,11 @@ var (
 		Use:   "index",
 		Short: "Build an index of IMDb data",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			err := imdb.Fetch(context.Background(), ".")
+			err := imdb.Fetch(context.Background(), viper.GetString(dbdir))
 			if err != nil {
 				return err
 			}
-			// TODO(achernya): fix dir
-			index, err := imdb.NewIndex(".")
+			index, err := imdb.NewIndex(viper.GetString(dbdir))
 			if err != nil {
 				return err
 			}
@@ -47,7 +47,7 @@ var (
 		Short: "Look up a given IMDb entry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			index, err := imdb.OpenIndex(".")
+			index, err := imdb.OpenIndex(viper.GetString(dbdir))
 			if err != nil {
 				return err
 			}
