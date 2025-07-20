@@ -1,0 +1,3 @@
+makemkvcon: /path/to/makemkvcon
+destdir: /path/to/where/extracted/content/goes
+dbdir:  /path/to/where/databases/should/go
