@@ -252,6 +252,10 @@ func (m *MakeMkv) Rip(drive *Drive, plan *Plan, cb func(msg *StreamResult, eof b
 		}
 
 		src := filepath.Join(m.dest, plan.DiscInfo.Titles[title.TitleIndex].OutputFileName)
+		if plan.Identity == nil {
+			log.Printf("Skipping renaming file since no identity was found")
+			continue
+		}
 		dst := filepath.Join(m.dest, fmt.Sprintf("%s (%d).mkv", plan.Identity.GetPrimaryTitle(), plan.Identity.GetStartYear()))
 		log.Printf("Renaming %s to %s\n", src, dst)
 		err = os.Rename(src, dst)

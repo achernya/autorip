@@ -76,56 +76,100 @@ func TestAnalyze(t *testing.T) {
 }
 
 func TestRip(t *testing.T) {
-	d, err := db.OpenDB(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp("", "autorip")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir) //nolint:errcheck
-	mkv := New(d, path.Join("testdata", "fakemkv.sh"), dir)
-	drive := &Drive{
-		Index: 0,
-		State: 2,
-	}
-	plan := &Plan{
-		Identity: pb.Title_builder{
-			PrimaryTitle: proto.String("Film"),
-			StartYear:    proto.Int32(2025),
-		}.Build(),
-		DiscInfo: &DiscInfo{
-			Titles: []TitleInfo{
-				{
-					GenericInfo: GenericInfo{
-						OutputFileName: "title_t0.mkv",
+	tests := map[string]struct {
+		plan     *Plan
+		expected []string
+	}{
+		"single title": {
+			plan: &Plan{
+				Identity: pb.Title_builder{
+					PrimaryTitle: proto.String("Film"),
+					StartYear:    proto.Int32(2025),
+				}.Build(),
+				DiscInfo: &DiscInfo{
+					Titles: []TitleInfo{
+						{
+							GenericInfo: GenericInfo{
+								OutputFileName: "title_t0.mkv",
+							},
+						},
+					},
+				},
+				RipTitles: []*Score{
+					{
+						TitleIndex: 0,
 					},
 				},
 			},
+			expected: []string{"Film (2025).mkv"},
 		},
-		RipTitles: []*Score{
-			{
-				TitleIndex: 0,
+		"no identity": {
+			plan: &Plan{
+				Identity: nil,
+				DiscInfo: &DiscInfo{
+					Titles: []TitleInfo{
+						{
+							GenericInfo: GenericInfo{
+								OutputFileName: "title_t0.mkv",
+							},
+						}, {
+							GenericInfo: GenericInfo{
+								OutputFileName: "title_t1.mkv",
+							},
+						},
+					},
+				},
+				RipTitles: []*Score{
+					{
+						TitleIndex: 0,
+					},
+					{
+						TitleIndex: 1,
+					},
+				},			
 			},
+			expected: []string{"title_t0.mkv", "title_t1.mkv"},
 		},
 	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			d, err := db.OpenDB(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir, err := os.MkdirTemp("", "autorip")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir) //nolint:errcheck
+			mkv := New(d, path.Join("testdata", "fakemkv.sh"), dir)
+			drive := &Drive{
+				Index: 0,
+				State: 2,
+			}
 
-	// Rip is going to try to move the file, which will fail unless we pre-create it.
-	f, err := os.Create(path.Join(dir, "title_t0.mkv"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Close() //nolint:errcheck
+			// Rip is going to try to move the file, which will fail unless we pre-create it.
+			for _, filename := range tt.plan.DiscInfo.Titles {
+				f, err := os.Create(path.Join(dir, filename.OutputFileName))
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.Close() //nolint:errcheck
 
-	cb := func(msg *StreamResult, eof bool) {}
-	err = mkv.Rip(drive, plan, cb)
-	if err != nil {
-		t.Fatal(err)
+			}
+
+			cb := func(msg *StreamResult, eof bool) {}
+			err = mkv.Rip(drive, tt.plan, cb)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, filename := range tt.expected {
+				f, err := os.Open(path.Join(dir, filename))
+				if err != nil {
+					t.Errorf("file %s Rip created could not be found", filename)
+				}
+				f.Close() //nolint:errcheck
+			}
+		})
 	}
-	f, err = os.Open(path.Join(dir, "Film (2025).mkv"))
-	if err != nil {
-		t.Error("file that Rip created could not be found")
-	}
-	f.Close() //nolint:errcheck
 }
