@@ -51,7 +51,9 @@ var ripCmd = &cobra.Command{
 
 		cb := func(msg *makemkv.StreamResult, eof bool) {
 			if eof {
-				p.Send(tui.Eof{})
+				// If we send tui.Eof here, then the
+				// TUI will end even if there are
+				// multiple entries being ripped.
 				return
 			}
 			p.Send(msg)
@@ -61,11 +63,11 @@ var ripCmd = &cobra.Command{
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer p.Send(tui.Eof{})
 			err := mkv.Rip(drives[analysis.DriveIndex], plan, cb)
 			if err != nil {
 				panic(err)
 			}
-
 		}()
 
 		if _, err := p.Run(); err != nil {
