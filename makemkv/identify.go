@@ -222,9 +222,16 @@ func (i *Identifier) DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, er
 }
 
 func (i *Identifier) XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
+	// Some discs have a name that is made entirely of spaces. So
+	// remove leading/trailing spaces.
+	name := strings.TrimSpace(di.Name)
+	// and if it's empty, replace it with the VolumeName.
+	if len(name) == 0 {
+		name = di.VolumeName
+	}
 	// volume names have '_' instead of ' ', but we need the
 	// search terms to be seperated by spaces to work well.
-	query := strings.ReplaceAll(di.Name, "_", " ")
+	query := strings.ReplaceAll(name, "_", " ")
 	// Also escape `:` since that will be a field selector
 	query = strings.ReplaceAll(query, ":", "\\:")
 	// Also escape `-` since that is a negation character.
