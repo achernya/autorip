@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"path"
-	
+	"sync"
+
 	"github.com/achernya/autorip/db"
 	"github.com/achernya/autorip/imdb"
 	"github.com/achernya/autorip/makemkv"
+	"github.com/achernya/autorip/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 var (
@@ -36,20 +40,45 @@ func scan(mkv *makemkv.MakeMkv) ([]*makemkv.Drive, error) {
 
 func analyze(mkv *makemkv.MakeMkv, drives []*makemkv.Drive) (*makemkv.Analysis, error) {
 	if logid2 == -1 {
-		return mkv.Analyze(drives)
+		t := tui.NewTui()
+		p := tea.NewProgram(t)
+		cb := func(msg *makemkv.StreamResult, eof bool) {
+			if eof {
+				return
+			}
+			// Regardless of what the message was, send it to the TUI
+			p.Send(msg)
+		}
+		var result *makemkv.Analysis
+		var err error
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer p.Send(tui.Eof{})
+			result, err = mkv.Analyze(drives, cb)
+		}()
+		if _, err := p.Run(); err != nil {
+			return nil, err
+		}
+		wg.Wait()
+		return result, err
 	}
 	log, err := db.NewLogReader(mkv.DB, uint(logid2))
 	if err != nil {
 		return nil, err
 	}
+
 	parser := makemkv.NewParser(log)
 	var discInfo *makemkv.DiscInfo
+
 	for msg := range parser.Stream() {
 		switch msg := msg.Parsed.(type) {
 		case *makemkv.DiscInfo:
 			discInfo = msg
 		}
 	}
+
 	return &makemkv.Analysis{
 		DiscInfo: discInfo,
 	}, nil

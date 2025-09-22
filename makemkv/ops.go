@@ -160,7 +160,10 @@ type Analysis struct {
 // `drives` comes from ScanDrive, but can be specified manually. The
 // only fields checked in Drive as Index and State, and State bust be
 // DriveInserted.
-func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
+//
+// If `cb` is specified, it gets messages produced from MakeMKV during
+// the analysis phase. This is mostly useful for running the TUI.
+func (m *MakeMkv) Analyze(drives []*Drive, cb func(msg *StreamResult, eof bool)) (*Analysis, error) {
 	if err := m.sessionIfNeeded(); err != nil {
 		return nil, err
 	}
@@ -179,7 +182,10 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	}
 
 	var discInfo *DiscInfo = nil
-	cb := func(msg *StreamResult, eof bool) {
+	realCb := func(msg *StreamResult, eof bool) {
+		if cb != nil {
+			cb(msg, eof)
+		}
 		if eof {
 			return
 		}
@@ -192,7 +198,7 @@ func (m *MakeMkv) Analyze(drives []*Drive) (*Analysis, error) {
 	// We pass --noscan here to avoid accessing any other drives
 	// to avoid perturbing any concurrent processes working with
 	// them.
-	wait, err := m.run(context.Background(), cb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[targetDrive].Index))
+	wait, err := m.run(context.Background(), realCb, "--noscan", "info", fmt.Sprintf("disc:%d", drives[targetDrive].Index))
 	if err != nil {
 		return nil, err
 	}

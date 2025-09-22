@@ -59,14 +59,14 @@ func TestAnalyze(t *testing.T) {
 			State: 2,
 		},
 	}
-	analysis, err := mkv.Analyze(drives)
+	analysis, err := mkv.Analyze(drives, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !analysis.New {
 		t.Error("analysis somehow saw the disc before on an empty db")
 	}
-	analysis, err = mkv.Analyze(drives)
+	analysis, err = mkv.Analyze(drives, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestRip(t *testing.T) {
 					{
 						TitleIndex: 1,
 					},
-				},			
+				},
 			},
 			expected: []string{"title_t0.mkv", "title_t1.mkv"},
 		},
