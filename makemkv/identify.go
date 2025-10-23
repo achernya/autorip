@@ -32,6 +32,13 @@ var (
 			stddev: 29.34,
 		},
 	}
+	// These volume names indicate there's not enough metadata to
+	// identify the content, so don't even try.
+	insufficientInfo = []string{
+		"BDROM",
+		"LOGICAL_VOLUME_ID",
+		"VOLUME_SET_ID",
+	}
 )
 
 type Identifier struct {
@@ -228,6 +235,10 @@ func (i *Identifier) XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) 
 	// and if it's empty, replace it with the VolumeName.
 	if len(name) == 0 {
 		name = di.VolumeName
+	}
+	if slices.Contains(insufficientInfo, name) {
+		log.Printf("Volume name %q is not unique enough to be identified", name)
+		return nil, nil
 	}
 	// volume names have '_' instead of ' ', but we need the
 	// search terms to be seperated by spaces to work well.

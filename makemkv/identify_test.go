@@ -344,6 +344,16 @@ func TestXrefImdb(t *testing.T) {
 			index:    &fakeIndex{},
 			expected: -1,
 		},
+		"unidentifiable volume name": {
+			disc: &DiscInfo{
+				GenericInfo: GenericInfo{
+					VolumeName: "LOGICAL_VOLUME_ID",
+				},
+			},
+			scores:   nil,
+			index:    nil,
+			expected: -1,
+		},
 		"one movie": {
 			disc: &DiscInfo{},
 			scores: []*Score{
