@@ -39,6 +39,11 @@ var (
 		"LOGICAL_VOLUME_ID",
 		"VOLUME_SET_ID",
 	}
+	// Acceptable ratios for a particular content to be off on the target lenght.
+	ratios = map[string]float64{
+		"movie":    0.975,
+		"tvSeries": 0.9,
+	}
 )
 
 type Identifier struct {
@@ -141,6 +146,7 @@ type Score struct {
 	TitleIndex int
 	Duration   time.Duration
 	Type       string
+	Playlist   string
 	Likelihood float64
 }
 
@@ -203,6 +209,7 @@ func (i *Identifier) DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, er
 			TitleIndex: index,
 			Duration:   dur,
 			Type:       result[last].name,
+			Playlist:   title.SourceFileName,
 			Likelihood: result[last].value / result[0].value,
 		})
 	}
@@ -229,6 +236,10 @@ func (i *Identifier) DiscLikelyContains(titles map[int]*TitleInfo) ([]*Score, er
 }
 
 func (i *Identifier) XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) {
+	// If there are no scores for titles on the disc, there's nothing to compare.
+	if len(scores) == 0 {
+		return nil, nil
+	}
 	// Some discs have a name that is made entirely of spaces. So
 	// remove leading/trailing spaces.
 	name := strings.TrimSpace(di.Name)
@@ -255,6 +266,10 @@ func (i *Identifier) XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) 
 		return nil, err
 	}
 	defer cancel()
+	wantType := scores[0].Type
+	if wantType == "tvEpisode" {
+		wantType = "tvSeries"
+	}
 	for info := range ch {
 		// For now, we'll use a very simple algorithm: assume
 		// that the classifier for movie vs tvEpisode was
@@ -268,20 +283,37 @@ func (i *Identifier) XrefImdb(di *DiscInfo, scores []*Score) (*pb.Title, error) 
 			// container series at this point.
 			continue
 		}
-		if entry.GetTitleType() != scores[0].Type {
-			log.Printf("Skipping %s (got %s, want %s)\n", entry.GetTConst(), entry.GetTitleType(), scores[0].Type)
+		if entry.GetTitleType() != wantType {
+			log.Printf("Skipping %s (got %s, want %s)\n", entry.GetTConst(), entry.GetTitleType(), wantType)
 			continue
 		}
 		durations := []time.Duration{time.Minute * time.Duration(entry.GetRuntimeMinutes()), scores[0].Duration}
 		slices.Sort(durations)
 		ratio := float64(durations[0]) / float64(durations[1])
-		if ratio > 0.975 {
+		if ratio > ratios[wantType] {
 			log.Printf("Found [%s] %s\n", entry.GetTConst(), entry.GetPrimaryTitle())
 			return entry, nil
 		}
-		log.Printf("Skipping %s, bad ratio %f\n", entry.GetPrimaryTitle(), ratio)
+		log.Printf("Skipping %s, bad ratio %f < %f\n", entry.GetPrimaryTitle(), ratio, ratios[wantType])
 	}
 	return nil, nil
+}
+
+func (i *Identifier) RemoveOutliers(scores []*Score, runtime int32) []*Score {
+	result := make([]*Score, 0)
+	for _, score := range scores {
+		durations := []time.Duration{time.Minute * time.Duration(runtime), score.Duration}
+		slices.Sort(durations)
+		ratio := float64(durations[0]) / float64(durations[1])
+		if ratio < 0.9 {
+			continue
+		}
+		result = append(result, score)
+	}
+	slices.SortFunc(result, func(a, b *Score) int {
+		return cmp.Compare(a.Playlist, b.Playlist)
+	})
+	return result
 }
 
 type Plan struct {
@@ -312,6 +344,12 @@ func (i *Identifier) MakePlan(discInfo *DiscInfo) (*Plan, error) {
 		// TODO(achernya): deal with the Inception edge case
 		// here and in XrefImdb.
 		result.RipTitles = result.RipTitles[:1]
+	} else {
+		// For tvSeries, remove any outliers
+		result.RipTitles = i.RemoveOutliers(result.RipTitles, identity.GetRuntimeMinutes())
+	}
+	for _, title := range result.RipTitles {
+		log.Printf("Plan to rip title %d (type: %s; duration %v)", title.TitleIndex, title.Type, title.Duration)
 	}
 	return result, nil
 }

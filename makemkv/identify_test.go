@@ -374,6 +374,30 @@ func TestXrefImdb(t *testing.T) {
 			},
 			expected: 0,
 		},
+		"two episodes": {
+			disc: &DiscInfo{},
+			scores: []*Score{
+				{
+					Duration: 29 * time.Minute,
+					Type:     "tvEpisode",
+				},
+				{
+					Duration: 31 * time.Minute,
+					Type:     "tvEpisode",
+				},
+			},
+			index: &fakeIndex{
+				results: []*pb.Result{
+					pb.Result_builder{
+						Entry: pb.Title_builder{
+							TitleType:      proto.String("tvSeries"),
+							RuntimeMinutes: proto.Int32(30),
+						}.Build(),
+					}.Build(),
+				},
+			},
+			expected: 0,
+		},
 		"unrelated results first": {
 			disc: &DiscInfo{},
 			scores: []*Score{
