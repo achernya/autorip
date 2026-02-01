@@ -21,7 +21,6 @@ func TestEmptyDB(t *testing.T) {
 	if s.Scan() {
 		t.Errorf("scanner unexpectedly produced tokens")
 	}
-
 }
 
 func TestSingleEntry(t *testing.T) {
